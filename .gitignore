@@ -1,0 +1,53 @@
+# Dependencies and generated application output
+node_modules/
+.next/
+.netlify/
+.vercel/
+coverage/
+artifacts/
+.qa-final/
+tsconfig.tsbuildinfo
+
+# Environment files and credentials
+.env
+.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+credentials.*
+*password*
+*secret*
+!lib/server/passwords.ts
+!scripts/secret-scan.mjs
+
+# Deployment, test, and diagnostic logs
+*.log
+NETLIFY_BUILD*.log
+NETLIFY_DEPLOY*.log
+TURBOPACK_BUILD*.log
+
+# Private source data and backups
+backups/
+_private/
+*.xlsx
+*.xls
+*.csv
+*.zip
+
+# Local recovery and deployment helpers retained outside the public repository
+*.ps1
+BACKEND_ANTERIOR_README.md
+CURRENT_PROJECT_CONTEXT.txt
+CURRENT_PROJECT_INVENTORY.txt
+HOTFIX_ASAP_README.md
+PACKAGE_FIX_NOTE.md
+PROJECT_HANDOFF_AUDIT.md
+VERCEL_DEPLOY_FIX_README.md
+database/postgresql/
+components/deploy-button.tsx
+docs/deployment-vercel.md
+docs/screenshots/
+tests/postgres-rls-runtime.test.mjs

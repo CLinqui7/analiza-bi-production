@@ -1,0 +1,10 @@
+[build]
+  base = "."
+  command = "npm run build"
+  publish = ".next"
+
+[build.environment]
+  NODE_VERSION = "24"
+  BUILD_STANDALONE = "false"
+  NETLIFY_NEXT_PLUGIN_SKIP = "false"
+  NPM_FLAGS = "--include=dev"
