@@ -266,6 +266,7 @@ export function TenantContextHeader({
   const [periodStart, setPeriodStart] = useState(`${getDefaultPeriod()}-01`);
   const [periodEnd, setPeriodEnd] = useState(`${getDefaultPeriod()}-31`);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
+  const [filtersDirty, setFiltersDirty] = useState(false);
   const [routeContextReady, setRouteContextReady] = useState(false);
   const [officialContextOptions, setOfficialContextOptions] =
     useState<HeaderContextOptions | null>(null);
@@ -761,7 +762,7 @@ export function TenantContextHeader({
   ]);
 
   useEffect(() => {
-    if (!routeContextReady) {
+    if (!routeContextReady || filtersDirty) {
       return;
     }
 
@@ -894,6 +895,7 @@ export function TenantContextHeader({
     professionalId,
     professionalOptions,
     routeContextReady,
+    filtersDirty,
     currentUserAccess,
     scopedBranchAccess,
     scopedBusinessLine,
@@ -916,6 +918,7 @@ export function TenantContextHeader({
         nextBusinessLineId,
       ).id;
 
+    setFiltersDirty(true);
     setBusinessLineId(nextBusinessLineId);
     setCompanyId(nextCompanyId);
     setBranchId(allBranchesValue);
@@ -1031,7 +1034,7 @@ export function TenantContextHeader({
               className="min-w-0 flex-1 bg-transparent outline-none"
               disabled={Boolean(scopedCompanyAccess?.scope.countryId)}
               value={effectiveCountryId}
-              onChange={(event) => setCountryId(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setCountryId(event.target.value); }}
             >
               {countryOptions.map((country) => (
                 <option key={country.id} value={country.id}>
@@ -1081,7 +1084,7 @@ export function TenantContextHeader({
               className="min-w-48 bg-transparent outline-none"
               disabled={isAreaLocked}
               value={operationalAreaId}
-              onChange={(event) => setOperationalAreaId(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setOperationalAreaId(event.target.value); }}
             >
               <option value={allOperationalAreasValue}>{areaAllLabel}</option>
               {operationalAreas.map((area) => (
@@ -1097,7 +1100,7 @@ export function TenantContextHeader({
               aria-label="Sucursal"
               className="min-w-44 bg-transparent outline-none"
               value={branchId}
-              onChange={(event) => setBranchId(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setBranchId(event.target.value); }}
             >
               <option value={allBranchesValue}>{branchAllLabel}</option>
               {branches.map((branch) => (
@@ -1114,7 +1117,7 @@ export function TenantContextHeader({
               aria-label="Gerente"
               className="min-w-40 bg-transparent outline-none"
               value={managerId}
-              onChange={(event) => setManagerId(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setManagerId(event.target.value); }}
             >
               {managerFilterOptions.map((manager) => (
                 <option key={manager.id} value={manager.id}>
@@ -1131,7 +1134,7 @@ export function TenantContextHeader({
               className="min-w-44 bg-transparent outline-none"
               disabled={isSecondaryFilterDisabled}
               value={professionalId}
-              onChange={(event) => setProfessionalId(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setProfessionalId(event.target.value); }}
             >
               {professionalOptions.map((professional) => (
                 <option key={professional.id} value={professional.id}>
@@ -1148,7 +1151,7 @@ export function TenantContextHeader({
               className="min-w-44 bg-transparent outline-none"
               disabled={isSecondaryFilterDisabled}
               value={serviceId}
-              onChange={(event) => setServiceId(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setServiceId(event.target.value); }}
             >
               {serviceOptions.map((service) => (
                 <option key={service.id} value={service.id}>
@@ -1165,7 +1168,7 @@ export function TenantContextHeader({
               className="min-w-40 bg-transparent outline-none"
               disabled={isSecondaryFilterDisabled}
               value={payerId}
-              onChange={(event) => setPayerId(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setPayerId(event.target.value); }}
             >
               {payerOptions.map((payer) => (
                 <option key={payer.id} value={payer.id}>
@@ -1182,7 +1185,7 @@ export function TenantContextHeader({
               className="min-w-40 bg-transparent outline-none"
               disabled={isSecondaryFilterDisabled}
               value={channelId}
-              onChange={(event) => setChannelId(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setChannelId(event.target.value); }}
             >
               {channelOptions.map((channel) => (
                 <option key={channel.id} value={channel.id}>
@@ -1199,7 +1202,7 @@ export function TenantContextHeader({
               className="w-28 bg-transparent outline-none"
               type="date"
               value={periodStart}
-              onChange={(event) => setPeriodStart(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setPeriodStart(event.target.value); }}
             />
           </label>
 
@@ -1210,9 +1213,17 @@ export function TenantContextHeader({
               className="w-28 bg-transparent outline-none"
               type="date"
               value={periodEnd}
-              onChange={(event) => setPeriodEnd(event.target.value)}
+              onChange={(event) => { setFiltersDirty(true); setPeriodEnd(event.target.value); }}
             />
           </label>
+          <button
+            className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={!filtersDirty}
+            onClick={() => setFiltersDirty(false)}
+            type="button"
+          >
+            Aplicar filtros
+          </button>
         </div>
       ) : null}
     </div>
