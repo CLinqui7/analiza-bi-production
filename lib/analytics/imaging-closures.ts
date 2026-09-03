@@ -3152,7 +3152,10 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function shouldUsePostgresPersistence() {
-  return !isDemoRuntimeEnvironment();
+  // Supabase V7 is the production persistence boundary. The retired direct
+  // PostgreSQL adapter remains available only for installations that still
+  // deliberately configure a server-side connection string during migration.
+  return !isDemoRuntimeEnvironment() && getMissingDatabaseConfig().length === 0;
 }
 
 function ensurePostgresPersistenceConfigured() {

@@ -107,9 +107,9 @@ for (const calculatedColumn of [
 assert.ok(
   service.includes("business_line = 'IMAGING'") &&
     service.includes("co.unit_type = 'imagenes'") &&
-    service.includes("getPostgresPool") &&
+    service.includes("getMissingDatabaseConfig().length === 0") &&
     service.includes("isDemoRuntimeEnvironment"),
-  "Imaging service must use the common persistence engine outside demo.",
+  "Imaging service must avoid direct PostgreSQL when only Supabase V7 is configured.",
 );
 
 for (const clinicalKpi of [

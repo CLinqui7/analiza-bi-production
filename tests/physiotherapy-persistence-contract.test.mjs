@@ -102,8 +102,8 @@ for (const insightField of [
 
 assert.ok(
   analytics.includes("function shouldUsePostgresPersistence()") &&
-    analytics.includes("!isDemoRuntimeEnvironment()"),
-  "PostgreSQL persistence must be the default outside APP_ENV=demo.",
+    analytics.includes("getMissingDatabaseConfig().length === 0"),
+  "The legacy PostgreSQL adapter must be disabled when Supabase V7 is the only configured runtime.",
 );
 assert.ok(
   analytics.includes("getPostgresPool"),
