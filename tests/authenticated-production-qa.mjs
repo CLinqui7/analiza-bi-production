@@ -13,7 +13,12 @@ const { chromium } = await import("playwright");
 const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage();
 const failures = [];
-page.on("console", (message) => { if (message.type() === "error") failures.push(`console:${message.text()}`); });
+page.on("console", (message) => {
+  if (message.type() === "error") {
+    const location = message.location();
+    failures.push(`console:${message.text()} ${location.url ?? ""}`.trim());
+  }
+});
 page.on("response", (response) => { if (response.status() >= 500) failures.push(`network:${response.status()} ${response.url()}`); });
 
 try {

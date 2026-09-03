@@ -143,16 +143,18 @@ export function LoginForm({
     setError(null);
 
     try {
-      const demoResponse = await fetch("/auth/demo-admin", {
-        body: JSON.stringify({ email, password }),
-        headers: { "Content-Type": "application/json" },
-        method: "POST",
-      });
+      if (enableLocalDemoLogin) {
+        const demoResponse = await fetch("/auth/demo-admin", {
+          body: JSON.stringify({ email, password }),
+          headers: { "Content-Type": "application/json" },
+          method: "POST",
+        });
 
-      if (demoResponse.ok) {
-        router.push("/protected/context");
-        router.refresh();
-        return;
+        if (demoResponse.ok) {
+          router.push("/protected/context");
+          router.refresh();
+          return;
+        }
       }
 
       // Production users already live in the previous Supabase project. Prefer
