@@ -243,6 +243,11 @@ function TargetTable({ rows }: { rows: OfficialTargetComparison[] }) {
         <Target className="size-4 text-primary" />
         Metas aprobadas vs resultados
       </div>
+      {rows.length === 0 ? (
+        <p className="text-sm text-muted-foreground">
+          Sin metas aprobadas para los cierres publicados y el alcance seleccionado.
+        </p>
+      ) : (
       <div className="overflow-x-auto">
         <table className="w-full min-w-[920px] text-left text-sm">
           <thead className="border-b text-xs text-muted-foreground">
@@ -286,6 +291,7 @@ function TargetTable({ rows }: { rows: OfficialTargetComparison[] }) {
           </tbody>
         </table>
       </div>
+      )}
     </section>
   );
 }
@@ -345,7 +351,7 @@ export function OfficialExecutiveDataDashboard({
           <Badge className="w-fit bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
             Datos oficiales
           </Badge>
-          <Badge variant="outline">PostgreSQL RLS</Badge>
+          <Badge variant="outline">Supabase RLS</Badge>
         </div>
         <div className="flex items-center gap-3">
           <div className="flex size-10 items-center justify-center rounded-md border bg-card">

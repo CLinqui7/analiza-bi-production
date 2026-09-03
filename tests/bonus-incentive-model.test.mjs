@@ -155,8 +155,6 @@ assert.ok(managerBonusNavigation, "Manager bonus navigation entry is missing.");
 for (const requiredRole of [
   "...adminRoles",
   '"ceo"',
-  '"gerente_operaciones"',
-  '"gerente_area"',
 ]) {
   assert.ok(
     managerBonusNavigation.includes(requiredRole),
@@ -164,10 +162,16 @@ for (const requiredRole of [
   );
 }
 
-assert.ok(
-  !managerBonusNavigation.includes('"gerente_sucursal"'),
-  "Branch manager must not see the manager bonus module.",
-);
+for (const forbiddenRole of [
+  '"gerente_operaciones"',
+  '"gerente_area"',
+  '"gerente_sucursal"',
+]) {
+  assert.ok(
+    !managerBonusNavigation.includes(forbiddenRole),
+    `${forbiddenRole} must not see the manager bonus module.`,
+  );
+}
 
 assert.ok(
   packageJson.includes("tests/bonus-workflow.test.mjs"),

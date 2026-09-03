@@ -75,8 +75,8 @@ export const roleHierarchy: RoleHierarchyEntry[] = [
   {
     roleKey: "ceo",
     hierarchyLevel: 90,
-    canCreateUsers: true,
-    canCreateBranches: true,
+    canCreateUsers: false,
+    canCreateBranches: false,
     canCreateOperationalAreas: false,
     canManageGlobalPermissions: false,
   },
@@ -91,7 +91,7 @@ export const roleHierarchy: RoleHierarchyEntry[] = [
   {
     roleKey: "gerente_area",
     hierarchyLevel: 60,
-    canCreateUsers: true,
+    canCreateUsers: false,
     canCreateBranches: false,
     canCreateOperationalAreas: false,
     canManageGlobalPermissions: false,
@@ -99,7 +99,7 @@ export const roleHierarchy: RoleHierarchyEntry[] = [
   {
     roleKey: "gerente_sucursal",
     hierarchyLevel: 40,
-    canCreateUsers: true,
+    canCreateUsers: false,
     canCreateBranches: false,
     canCreateOperationalAreas: false,
     canManageGlobalPermissions: false,
@@ -143,10 +143,10 @@ const standardRoleCreation: Record<RoleKey, RoleKey[]> = {
     "usuario_operativo",
     "viewer",
   ],
-  ceo: ["gerente_operaciones", "usuario_operativo", "viewer"],
+  ceo: [],
   gerente_operaciones: ["gerente_area", "gerente_sucursal", "usuario_operativo", "viewer"],
-  gerente_area: ["gerente_sucursal", "usuario_operativo", "viewer"],
-  gerente_sucursal: ["usuario_operativo", "viewer"],
+  gerente_area: [],
+  gerente_sucursal: [],
   usuario_operativo: [],
   viewer: [],
 };
@@ -236,7 +236,6 @@ export function canCreateBranch(actor: DelegationActor, targetScope: ScopeBounda
 
   return (
     isSuperAdministrator(actor.roleKey) ||
-    actor.roleKey === "ceo" ||
     actor.roleKey === "gerente_operaciones"
   );
 }
@@ -280,7 +279,7 @@ export function canAssignBranchToArea(
 }
 
 export function canAccessRecord(actor: DelegationActor, targetScope: ScopeBoundary) {
-  if (isSuperAdministrator(actor.roleKey)) {
+  if (isSuperAdministrator(actor.roleKey) || actor.roleKey === "ceo") {
     return actor.scope.organizationId === targetScope.organizationId;
   }
 

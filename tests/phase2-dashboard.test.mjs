@@ -480,8 +480,8 @@ if (!modulePage.includes("CapacityOccupancyDashboard")) {
   throw new Error("Capacidad y ocupacion must use the specialized capacity dashboard.");
 }
 
-if (!modulePage.includes("BranchNetworkDashboard")) {
-  throw new Error("Sucursales must use the specialized branch network dashboard.");
+if (!modulePage.includes("BranchBiServerDashboard")) {
+  throw new Error("Sucursales must use the V7 scoped branch BI dashboard.");
 }
 
 for (const requiredAnalyticsChartText of [

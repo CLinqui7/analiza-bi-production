@@ -58,6 +58,7 @@ import {
   isBranchManagerScopedAccess,
   type CurrentUserAccess,
 } from "@/lib/tenant/current-user-access";
+import { shouldRenderScopedFilter } from "@/lib/analytics/filter-visibility";
 
 const demoBusinessLineStorageKey = "analiza:demo-business-line";
 const roleChangeEvent = "analiza:role-change";
@@ -80,6 +81,32 @@ type OfficialContextOptionsResponse = {
   ok?: boolean;
   options?: HeaderContextOptions;
 };
+
+// Reuse an in-flight browser request during React Strict Mode remounts. The
+// promise is cleared once settled, so official context data is never cached
+// across session changes.
+let officialContextOptionsInFlight: Promise<OfficialContextOptionsResponse | null> | null = null;
+
+function fetchOfficialContextOptions() {
+  if (!officialContextOptionsInFlight) {
+    const request = fetch("/api/context/options", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        return (await response.json().catch(() => null)) as
+          | OfficialContextOptionsResponse
+          | null;
+      })
+      .catch(() => null);
+    officialContextOptionsInFlight = request;
+    void request.finally(() => {
+      if (officialContextOptionsInFlight === request) {
+        officialContextOptionsInFlight = null;
+      }
+    });
+  }
+
+  return officialContextOptionsInFlight;
+}
 
 const demoHeaderContextOptions: HeaderContextOptions = {
   branches: demoBranches,
@@ -128,6 +155,25 @@ type StoredContext = {
   month: string;
   isDemo: boolean;
 };
+
+type FilterDraft = {
+  branchId: string;
+  businessLineId: string;
+  channelId: string;
+  companyId: string;
+  countryId: string;
+  managerId: string;
+  operationalAreaId: string;
+  payerId: string;
+  periodEnd: string;
+  periodStart: string;
+  professionalId: string;
+  serviceId: string;
+};
+
+function getFilterDraftKey(draft: FilterDraft) {
+  return JSON.stringify(draft);
+}
 
 function getInitialCountryId() {
   return demoCountryOptions[0]?.id ?? "";
@@ -266,7 +312,8 @@ export function TenantContextHeader({
   const [periodStart, setPeriodStart] = useState(`${getDefaultPeriod()}-01`);
   const [periodEnd, setPeriodEnd] = useState(`${getDefaultPeriod()}-31`);
   const [advancedFiltersOpen, setAdvancedFiltersOpen] = useState(false);
-  const [filtersDirty, setFiltersDirty] = useState(false);
+  const [appliedFilterKey, setAppliedFilterKey] = useState<string | null>(null);
+  const [hasAppliedFilters, setHasAppliedFilters] = useState(false);
   const [routeContextReady, setRouteContextReady] = useState(false);
   const [officialContextOptions, setOfficialContextOptions] =
     useState<HeaderContextOptions | null>(null);
@@ -438,6 +485,75 @@ export function TenantContextHeader({
       selectedCountry?.scope,
     ],
   );
+  const isLineLocked = Boolean(scopedCompanyAccess);
+  const isAreaLocked = Boolean(scopedAreaAccess && operationalAreas.length <= 1);
+  const draftFilterKey = useMemo(
+    () =>
+      getFilterDraftKey({
+        branchId,
+        businessLineId,
+        channelId,
+        companyId: effectiveCompanyId,
+        countryId: effectiveCountryId,
+        managerId,
+        operationalAreaId,
+        payerId,
+        periodEnd,
+        periodStart,
+        professionalId,
+        serviceId,
+      }),
+    [
+      branchId,
+      businessLineId,
+      channelId,
+      effectiveCompanyId,
+      effectiveCountryId,
+      managerId,
+      operationalAreaId,
+      payerId,
+      periodEnd,
+      periodStart,
+      professionalId,
+      serviceId,
+    ],
+  );
+  const filtersDirty = hasAppliedFilters && appliedFilterKey !== draftFilterKey;
+  const canChooseBusinessLine =
+    !isLineLocked && shouldRenderScopedFilter(businessLineOptions, (line) => line.id);
+  const canChooseCountry =
+    !scopedCompanyAccess && shouldRenderScopedFilter(countryOptions, (country) => country.id);
+  const canChooseOperationalArea =
+    !isAreaLocked && shouldRenderScopedFilter(operationalAreas, (area) => area.id);
+  const canChooseBranch = shouldRenderScopedFilter(branches, (branch) => branch.id);
+  const canChooseManager = shouldRenderScopedFilter(
+    managerFilterOptions.filter((manager) => manager.id !== allManagersValue),
+    (manager) => manager.id,
+  );
+  const canChooseProfessional = shouldRenderScopedFilter(
+    professionalOptions.filter((professional) => professional.id !== allProfessionalsValue),
+    (professional) => professional.id,
+  );
+  const canChooseService = shouldRenderScopedFilter(
+    serviceOptions.filter((service) => service.id !== allServicesValue),
+    (service) => service.id,
+  );
+  const canChoosePayer = shouldRenderScopedFilter(
+    payerOptions.filter((payer) => payer.id !== allPayersValue),
+    (payer) => payer.id,
+  );
+  const canChooseChannel = shouldRenderScopedFilter(
+    channelOptions.filter((channel) => channel.id !== allChannelsValue),
+    (channel) => channel.id,
+  );
+  const hasAdvancedFilters =
+    canChooseOperationalArea ||
+    canChooseBranch ||
+    canChooseManager ||
+    canChooseProfessional ||
+    canChooseService ||
+    canChoosePayer ||
+    canChooseChannel;
 
   useEffect(() => {
     let isMounted = true;
@@ -461,16 +577,7 @@ export function TenantContextHeader({
 
     let isMounted = true;
 
-    fetch("/api/context/options", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) {
-          return null;
-        }
-
-        return (await response.json().catch(() => null)) as
-          | OfficialContextOptionsResponse
-          | null;
-      })
+    fetchOfficialContextOptions()
       .then((payload) => {
         if (!isMounted) {
           return;
@@ -552,6 +659,25 @@ export function TenantContextHeader({
     setChannelId(nextContext.channelId);
     setPeriodStart(nextContext.periodStart);
     setPeriodEnd(nextContext.periodEnd);
+    window.localStorage.setItem(storageKey, JSON.stringify(nextContext));
+    window.sessionStorage.setItem(storageKey, JSON.stringify(nextContext));
+    setAppliedFilterKey(
+      getFilterDraftKey({
+        branchId: nextContext.branchId,
+        businessLineId: nextContext.businessLineId,
+        channelId: nextContext.channelId,
+        companyId: nextContext.companyId,
+        countryId: nextContext.countryId,
+        managerId: nextContext.managerId,
+        operationalAreaId: nextContext.operationalAreaId,
+        payerId: nextContext.payerId,
+        periodEnd: nextContext.periodEnd,
+        periodStart: nextContext.periodStart,
+        professionalId: nextContext.professionalId,
+        serviceId: nextContext.serviceId,
+      }),
+    );
+    setHasAppliedFilters(true);
     setRouteContextReady(true);
   }, [
     branchOptions,
@@ -761,19 +887,16 @@ export function TenantContextHeader({
     scopedBranchAccess,
   ]);
 
-  useEffect(() => {
-    if (!routeContextReady || filtersDirty) {
-      return;
-    }
-
+  const publishCurrentFilters = useCallback(() => {
     if (
-      !isDemoEnvironment &&
-      (officialContextOptions === null ||
-        countryOptions.length === 0 ||
-        companyOptions.length === 0 ||
-        businessLineOptions.length === 0)
+      !routeContextReady ||
+      (!isDemoEnvironment &&
+        (officialContextOptions === null ||
+          countryOptions.length === 0 ||
+          companyOptions.length === 0 ||
+          businessLineOptions.length === 0))
     ) {
-      return;
+      return false;
     }
 
     const country = countryOptions.find((item) => item.id === effectiveCountryId);
@@ -791,7 +914,7 @@ export function TenantContextHeader({
     );
 
     if (!businessLine) {
-      return;
+      return false;
     }
 
     const contextBranchFallbackName = scopedAreaAccess
@@ -871,6 +994,7 @@ export function TenantContextHeader({
     const searchParams = toGlobalFilterSearchParams(context);
     replaceRouteSearchParams(searchParams);
     window.dispatchEvent(new Event(contextChangeEvent));
+    return true;
   }, [
     branchId,
     businessLineId,
@@ -878,9 +1002,7 @@ export function TenantContextHeader({
     branchOptions,
     channelId,
     channelOptions,
-    companyId,
     companyOptions,
-    countryId,
     countryOptions,
     effectiveCompanyId,
     effectiveCountryId,
@@ -895,8 +1017,6 @@ export function TenantContextHeader({
     professionalId,
     professionalOptions,
     routeContextReady,
-    filtersDirty,
-    currentUserAccess,
     scopedBranchAccess,
     scopedBusinessLine,
     scopedAreaAccess,
@@ -909,6 +1029,15 @@ export function TenantContextHeader({
     serviceOptions,
   ]);
 
+  function applyFilters() {
+    if (!publishCurrentFilters()) {
+      return;
+    }
+
+    setAppliedFilterKey(draftFilterKey);
+    setHasAppliedFilters(true);
+  }
+
   function handleBusinessLineChange(nextBusinessLineId: string) {
     const nextCompanyId =
       scopedCompanyAccess?.scope.companyId ??
@@ -918,7 +1047,6 @@ export function TenantContextHeader({
         nextBusinessLineId,
       ).id;
 
-    setFiltersDirty(true);
     setBusinessLineId(nextBusinessLineId);
     setCompanyId(nextCompanyId);
     setBranchId(allBranchesValue);
@@ -959,8 +1087,6 @@ export function TenantContextHeader({
     scopedAreaAccess?.scope.operationalAreaName ??
     selectedOperationalArea?.name ??
     areaAllLabel;
-  const isLineLocked = Boolean(scopedCompanyAccess);
-  const isAreaLocked = Boolean(scopedAreaAccess && operationalAreas.length <= 1);
   const isSecondaryFilterDisabled = !isDemoEnvironment;
 
   if (scopedBranchAccess) {
@@ -1005,7 +1131,7 @@ export function TenantContextHeader({
             <span className="font-semibold uppercase text-primary">
               {isLineLocked ? "Linea asignada" : "Linea activa"}
             </span>
-            {isLineLocked ? (
+            {isLineLocked || !canChooseBusinessLine ? (
               <span className="truncate text-base font-semibold text-accent-foreground">
                 {lineLabel}
               </span>
@@ -1029,19 +1155,24 @@ export function TenantContextHeader({
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 rounded-lg border border-border/80 bg-background/90 p-2 shadow-sm">
           <label className="flex h-9 min-w-44 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
             <Globe2 className="size-3.5 shrink-0 text-muted-foreground" />
-            <select
-              aria-label="Pais o region"
-              className="min-w-0 flex-1 bg-transparent outline-none"
-              disabled={Boolean(scopedCompanyAccess?.scope.countryId)}
-              value={effectiveCountryId}
-              onChange={(event) => { setFiltersDirty(true); setCountryId(event.target.value); }}
-            >
-              {countryOptions.map((country) => (
-                <option key={country.id} value={country.id}>
-                  {country.name}
-                </option>
-              ))}
-            </select>
+            {canChooseCountry ? (
+              <select
+                aria-label="Pais o region"
+                className="min-w-0 flex-1 bg-transparent outline-none"
+                value={effectiveCountryId}
+                onChange={(event) => setCountryId(event.target.value)}
+              >
+                {countryOptions.map((country) => (
+                  <option key={country.id} value={country.id}>
+                    {country.name}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <span className="min-w-0 flex-1 truncate font-medium">
+                {countryLabel}
+              </span>
+            )}
           </label>
 
           <div className="min-w-0 flex-1 truncate px-1 text-sm">
@@ -1059,7 +1190,7 @@ export function TenantContextHeader({
             type="button"
           >
             <SlidersHorizontal className="size-3.5" />
-            Filtros
+            {hasAdvancedFilters ? "Filtros" : "Periodo"}
           </button>
 
           <span
@@ -1077,123 +1208,136 @@ export function TenantContextHeader({
           <div className="px-2 text-xs font-semibold text-muted-foreground">
             Filtros avanzados
           </div>
-          <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
-            <BriefcaseBusiness className="size-3.5 text-muted-foreground" />
-            <select
-              aria-label="Area operativa"
-              className="min-w-48 bg-transparent outline-none"
-              disabled={isAreaLocked}
-              value={operationalAreaId}
-              onChange={(event) => { setFiltersDirty(true); setOperationalAreaId(event.target.value); }}
-            >
-              <option value={allOperationalAreasValue}>{areaAllLabel}</option>
-              {operationalAreas.map((area) => (
-                <option key={area.id} value={area.id}>
-                  {area.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
-            <MapPin className="size-3.5 text-muted-foreground" />
-            <select
-              aria-label="Sucursal"
-              className="min-w-44 bg-transparent outline-none"
-              value={branchId}
-              onChange={(event) => { setFiltersDirty(true); setBranchId(event.target.value); }}
-            >
-              <option value={allBranchesValue}>{branchAllLabel}</option>
-              {branches.map((branch) => (
-                <option key={branch.id} value={branch.id}>
-                  {branch.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {canChooseOperationalArea ? (
+            <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
+              <BriefcaseBusiness className="size-3.5 text-muted-foreground" />
+              <select
+                aria-label="Area operativa"
+                className="min-w-48 bg-transparent outline-none"
+                value={operationalAreaId}
+                onChange={(event) => setOperationalAreaId(event.target.value)}
+              >
+                <option value={allOperationalAreasValue}>{areaAllLabel}</option>
+                {operationalAreas.map((area) => (
+                  <option key={area.id} value={area.id}>
+                    {area.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
+          {canChooseBranch ? (
+            <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
+              <MapPin className="size-3.5 text-muted-foreground" />
+              <select
+                aria-label="Sucursal"
+                className="min-w-44 bg-transparent outline-none"
+                value={branchId}
+                onChange={(event) => setBranchId(event.target.value)}
+              >
+                <option value={allBranchesValue}>{branchAllLabel}</option>
+                {branches.map((branch) => (
+                  <option key={branch.id} value={branch.id}>
+                    {branch.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
-          <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
-            <UsersRound className="size-3.5 text-muted-foreground" />
-            <select
-              aria-label="Gerente"
-              className="min-w-40 bg-transparent outline-none"
-              value={managerId}
-              onChange={(event) => { setFiltersDirty(true); setManagerId(event.target.value); }}
-            >
-              {managerFilterOptions.map((manager) => (
-                <option key={manager.id} value={manager.id}>
-                  {manager.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {canChooseManager ? (
+            <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
+              <UsersRound className="size-3.5 text-muted-foreground" />
+              <select
+                aria-label="Gerente"
+                className="min-w-40 bg-transparent outline-none"
+                value={managerId}
+                onChange={(event) => setManagerId(event.target.value)}
+              >
+                {managerFilterOptions.map((manager) => (
+                  <option key={manager.id} value={manager.id}>
+                    {manager.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
-          <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
-            <UsersRound className="size-3.5 text-muted-foreground" />
-            <select
-              aria-label="Profesional"
-              className="min-w-44 bg-transparent outline-none"
-              disabled={isSecondaryFilterDisabled}
-              value={professionalId}
-              onChange={(event) => { setFiltersDirty(true); setProfessionalId(event.target.value); }}
-            >
-              {professionalOptions.map((professional) => (
-                <option key={professional.id} value={professional.id}>
-                  {professional.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {canChooseProfessional ? (
+            <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
+              <UsersRound className="size-3.5 text-muted-foreground" />
+              <select
+                aria-label="Profesional"
+                className="min-w-44 bg-transparent outline-none"
+                disabled={isSecondaryFilterDisabled}
+                value={professionalId}
+                onChange={(event) => setProfessionalId(event.target.value)}
+              >
+                {professionalOptions.map((professional) => (
+                  <option key={professional.id} value={professional.id}>
+                    {professional.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
-          <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
-            <BriefcaseBusiness className="size-3.5 text-muted-foreground" />
-            <select
-              aria-label="Servicio"
-              className="min-w-44 bg-transparent outline-none"
-              disabled={isSecondaryFilterDisabled}
-              value={serviceId}
-              onChange={(event) => { setFiltersDirty(true); setServiceId(event.target.value); }}
-            >
-              {serviceOptions.map((service) => (
-                <option key={service.id} value={service.id}>
-                  {service.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {canChooseService ? (
+            <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
+              <BriefcaseBusiness className="size-3.5 text-muted-foreground" />
+              <select
+                aria-label="Servicio"
+                className="min-w-44 bg-transparent outline-none"
+                disabled={isSecondaryFilterDisabled}
+                value={serviceId}
+                onChange={(event) => setServiceId(event.target.value)}
+              >
+                {serviceOptions.map((service) => (
+                  <option key={service.id} value={service.id}>
+                    {service.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
-          <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
-            <BriefcaseBusiness className="size-3.5 text-muted-foreground" />
-            <select
-              aria-label="Pagador"
-              className="min-w-40 bg-transparent outline-none"
-              disabled={isSecondaryFilterDisabled}
-              value={payerId}
-              onChange={(event) => { setFiltersDirty(true); setPayerId(event.target.value); }}
-            >
-              {payerOptions.map((payer) => (
-                <option key={payer.id} value={payer.id}>
-                  {payer.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {canChoosePayer ? (
+            <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
+              <BriefcaseBusiness className="size-3.5 text-muted-foreground" />
+              <select
+                aria-label="Pagador"
+                className="min-w-40 bg-transparent outline-none"
+                disabled={isSecondaryFilterDisabled}
+                value={payerId}
+                onChange={(event) => setPayerId(event.target.value)}
+              >
+                {payerOptions.map((payer) => (
+                  <option key={payer.id} value={payer.id}>
+                    {payer.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
-          <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
-            <BriefcaseBusiness className="size-3.5 text-muted-foreground" />
-            <select
-              aria-label="Canal"
-              className="min-w-40 bg-transparent outline-none"
-              disabled={isSecondaryFilterDisabled}
-              value={channelId}
-              onChange={(event) => { setFiltersDirty(true); setChannelId(event.target.value); }}
-            >
-              {channelOptions.map((channel) => (
-                <option key={channel.id} value={channel.id}>
-                  {channel.name}
-                </option>
-              ))}
-            </select>
-          </label>
+          {canChooseChannel ? (
+            <label className="flex h-10 items-center gap-2 rounded-lg border bg-muted/40 px-2 text-xs">
+              <BriefcaseBusiness className="size-3.5 text-muted-foreground" />
+              <select
+                aria-label="Canal"
+                className="min-w-40 bg-transparent outline-none"
+                disabled={isSecondaryFilterDisabled}
+                value={channelId}
+                onChange={(event) => setChannelId(event.target.value)}
+              >
+                {channelOptions.map((channel) => (
+                  <option key={channel.id} value={channel.id}>
+                    {channel.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
 
           <label className="flex h-10 items-center gap-2 rounded-md border bg-muted/40 px-2 text-xs">
             <CalendarDays className="size-3.5 text-muted-foreground" />
@@ -1202,7 +1346,7 @@ export function TenantContextHeader({
               className="w-28 bg-transparent outline-none"
               type="date"
               value={periodStart}
-              onChange={(event) => { setFiltersDirty(true); setPeriodStart(event.target.value); }}
+              onChange={(event) => setPeriodStart(event.target.value)}
             />
           </label>
 
@@ -1213,13 +1357,13 @@ export function TenantContextHeader({
               className="w-28 bg-transparent outline-none"
               type="date"
               value={periodEnd}
-              onChange={(event) => { setFiltersDirty(true); setPeriodEnd(event.target.value); }}
+              onChange={(event) => setPeriodEnd(event.target.value)}
             />
           </label>
           <button
             className="inline-flex h-10 items-center rounded-lg bg-primary px-4 text-xs font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60"
             disabled={!filtersDirty}
-            onClick={() => setFiltersDirty(false)}
+            onClick={applyFilters}
             type="button"
           >
             Aplicar filtros

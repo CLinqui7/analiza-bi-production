@@ -167,18 +167,9 @@ export function canPerformAction(
       return false;
     }
 
-    if (isSuperAdministrator(actor.roleKey)) {
+    if (isSuperAdministrator(actor.roleKey) || actor.roleKey === "ceo") {
       return true;
     }
-
-    if (actor.roleKey === "gerente_operaciones") {
-      return target.roleKey === "gerente_area" || target.roleKey === "gerente_sucursal";
-    }
-
-    if (actor.roleKey === "gerente_area") {
-      return target.roleKey === "gerente_sucursal";
-    }
-
     return false;
   }
 

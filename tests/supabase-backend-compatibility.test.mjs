@@ -48,13 +48,13 @@ assert.match(account, /getSupabaseAdminClient/);
 
 const branchManagers = read("app/api/users/branch-managers/route.ts");
 assert.match(branchManagers, /v_manager_bonus_directory/);
-assert.match(branchManagers, /source: "supabase"/);
+assert.match(branchManagers, /source: "supabase-v7"/);
 
 const incentives = read("app/api/users/manager-incentives/route.ts");
 assert.match(incentives, /manager_bonus_plans/);
 assert.match(incentives, /v_manager_bonus_directory/);
 assert.match(incentives, /managerIncentive:\s*\{[\s\S]*managementLevel,/);
-assert.match(incentives, /management_level: managementLevel/);
+assert.match(incentives, /category: managementLevelToCategory\(managementLevel\)/);
 
 const branchCreate = read("app/api/branches/route.ts");
 assert.match(branchCreate, /getSupabaseAdminClient/);
@@ -83,23 +83,22 @@ assert.doesNotMatch(officialQuality, /Math\.random/);
 assert.match(modulePage, /module === "calidad-datos"[\s\S]*!isDemoRuntimeEnvironment\(\)[\s\S]*OfficialDataQualityDashboard/);
 
 const officialBi = read("lib/server/official-bi.ts");
-assert.match(officialBi, /getOfficialExecutiveSnapshotFromSupabase/);
-assert.match(officialBi, /if \(missingConfig\.length > 0\)/);
+assert.match(officialBi, /getBranchBiSnapshot/);
+assert.match(officialBi, /lineFilterMatches/);
+assert.doesNotMatch(officialBi, /getMissingDatabaseConfig/);
 
 const officialContext = read("lib/server/official-context-options.ts");
 assert.match(officialContext, /getOfficialContextOptionsFromSupabase/);
 assert.match(officialContext, /if \(getMissingDatabaseConfig\(\)\.length > 0\)/);
 
 for (const api of [
-  "app/api/account/profile/route.ts",
   "app/api/users/branch-managers/route.ts",
   "app/api/users/manager-incentives/route.ts",
-  "app/api/users/invite/route.ts",
   "app/api/branches/route.ts",
 ]) {
   const source = read(api);
-  assert.match(source, /getMissingDatabaseConfig/);
-  assert.match(source, /getSupabaseAdminClient|useSupabaseDirectory/);
+  assert.match(source, /getSupabaseAdminClient/);
+  assert.doesNotMatch(source, /getPostgresPool/);
 }
 
 const pkg = JSON.parse(read("package.json"));

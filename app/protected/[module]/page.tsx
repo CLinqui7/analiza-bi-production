@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
 
-import { BranchNetworkDashboard } from "@/components/branch-network-dashboard";
+import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard";
 import { BusinessModuleDashboard } from "@/components/business-module-dashboard";
 import { CapacityOccupancyDashboard } from "@/components/capacity-occupancy-dashboard";
 import { AccountProfileDashboard } from "@/components/account-profile-dashboard";
@@ -12,6 +12,7 @@ import { ImagingPresentationDashboard } from "@/components/imaging-presentation-
 import { ImportOperationsDashboard } from "@/components/import-operations-dashboard";
 import { LaboratoryPresentationDashboard } from "@/components/laboratory-presentation-dashboard";
 import { MonthlyClosureRouter } from "@/components/monthly-closure-router";
+import { OfficialManagerIncentiveDirectory } from "@/components/official-manager-incentive-directory";
 import { OperationsModule } from "@/components/operations-modules";
 import { PatientFlowDemandDashboard } from "@/components/patient-flow-demand-dashboard";
 import { PhysiotherapyPresentationDashboard } from "@/components/physiotherapy-presentation-dashboard";
@@ -109,7 +110,7 @@ export default async function ModulePage({
   }
 
   if (module === "sucursales") {
-    return <BranchNetworkDashboard />;
+    return <BranchBiServerDashboard actor={actor} mode="branches" />;
   }
 
   if (module === "profesionales") {
@@ -146,6 +147,10 @@ export default async function ModulePage({
 
   if (module === "importaciones") {
     return <ImportOperationsDashboard roleKey={actor.roleKey} />;
+  }
+
+  if (module === "gerentes" && !isDemoRuntimeEnvironment()) {
+    return <OfficialManagerIncentiveDirectory />;
   }
 
   if (module === "plantillas") {

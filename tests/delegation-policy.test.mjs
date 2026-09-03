@@ -162,8 +162,8 @@ assert.equal(
     countryId,
     organizationId,
   }),
-  true,
-  "CEO should create branches inside its business line scope.",
+  false,
+  "CEO must not create branches; this remains an operations responsibility.",
 );
 
 assert.equal(
@@ -174,24 +174,20 @@ assert.equal(
 
 assert.deepEqual(
   getCreatableRoles("ceo"),
-  [
-    "gerente_operaciones",
-    "usuario_operativo",
-    "viewer",
-  ],
-  "CEO must keep non-manager lower roles available without bypassing operations manager creation.",
+  [],
+  "CEO must not invite or create users in the controlled operations flow.",
 );
 
 assert.deepEqual(
   getCreatableRoles("gerente_area"),
-  ["gerente_sucursal", "usuario_operativo", "viewer"],
-  "Area manager must create branch managers and lower operational users in scope.",
+  [],
+  "Area manager must not create users or branch managers.",
 );
 
 assert.equal(
   canInviteUser(areaActor, branchManagerTarget),
-  true,
-  "Area manager should create branch managers inside its operational area.",
+  false,
+  "Area manager must not create branch managers.",
 );
 
 assert.equal(
@@ -208,8 +204,8 @@ assert.equal(
 
 assert.equal(
   canInviteUser(branchActor, operationalUserTarget),
-  true,
-  "Branch manager may create operational users when explicitly delegated.",
+  false,
+  "Branch manager must not create users in the controlled operations flow.",
 );
 
 for (const actorRole of roleHierarchy.map((entry) => entry.roleKey)) {

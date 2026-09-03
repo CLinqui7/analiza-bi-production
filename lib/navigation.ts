@@ -101,9 +101,7 @@ const connectorAdminRoles: RoleKey[] = adminRoles;
 
 const delegatedUserAdminRoles: RoleKey[] = [
   ...adminRoles,
-  "ceo",
   "gerente_operaciones",
-  "gerente_area",
 ];
 
 const ceoFocusedRoles: RoleKey[] = ["ceo"];
@@ -213,8 +211,6 @@ export const navigationItems: NavigationItem[] = [
     allowedRoles: [
       ...adminRoles,
       "ceo",
-      "gerente_operaciones",
-      "gerente_area",
     ],
   },
   {
@@ -292,7 +288,14 @@ export const navigationItems: NavigationItem[] = [
     href: "/protected/metas",
     icon: Goal,
     group: "direccion",
-    allowedRoles: ["gerente_area"],
+    allowedRoles: [
+      ...adminRoles,
+      "ceo",
+      "gerente_operaciones",
+      "gerente_area",
+      "gerente_sucursal",
+      "viewer",
+    ],
   },
   {
     title: "Usuarios y permisos",

@@ -2,8 +2,7 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 
 import { requireProtectedPath } from "@/lib/server/authorization";
-import { getOfficialExecutiveSnapshot } from "@/lib/server/official-bi";
-import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
+import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard";
 
 type OverviewPageProps = {
   searchParams?: Promise<{
@@ -21,26 +20,8 @@ async function OverviewGate({ searchParams }: OverviewPageProps) {
 
   const actor = await requireProtectedPath("/protected/overview");
 
-  if (isDemoRuntimeEnvironment()) {
-    const { ExecutiveDashboard } = await import("@/components/executive-dashboard");
-
-    return <ExecutiveDashboard />;
-  }
-
-  const params = searchParams ? await searchParams : {};
-  const snapshot = await getOfficialExecutiveSnapshot(actor, {
-    branchId: params.branch,
-    businessLineId: params.line,
-    companyId: params.company,
-    countryId: params.country,
-    periodEnd: params.to,
-    periodStart: params.from,
-  });
-  const { OfficialExecutiveDataDashboard } = await import(
-    "@/components/official-executive-data-dashboard"
-  );
-
-  return <OfficialExecutiveDataDashboard mode="overview" snapshot={snapshot} />;
+  void searchParams;
+  return <BranchBiServerDashboard actor={actor} mode="home" />;
 }
 
 export default function OverviewPage({ searchParams }: OverviewPageProps) {
