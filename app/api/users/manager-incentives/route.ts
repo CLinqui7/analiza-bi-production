@@ -230,6 +230,12 @@ export async function GET() {
     return jsonError("Debes iniciar sesion para consultar bonos.", 401);
   }
 
+  // A branch manager must never infer their own compensation from an empty
+  // directory response. Keep this server-side even if navigation is hidden.
+  if (actor.roleKey === "gerente_sucursal") {
+    return jsonError("No tienes acceso a bonos ni niveles gerenciales.", 403);
+  }
+
   const missingConfig = getMissingDatabaseConfig();
 
   const organizationId = actor.scope.organizationId;
@@ -292,6 +298,10 @@ export async function PATCH(request: Request) {
 
   if (!actor) {
     return jsonError("Debes iniciar sesion para editar bonos.", 401);
+  }
+
+  if (actor.roleKey === "gerente_sucursal") {
+    return jsonError("No tienes acceso a bonos ni niveles gerenciales.", 403);
   }
 
   const missingConfig = getMissingDatabaseConfig();
