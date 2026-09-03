@@ -19,6 +19,14 @@ type CreateBranchRequest = {
   scope?: unknown;
 };
 
+type BranchReadRow = {
+  id: string;
+  company_id: string | null;
+  country_id: string | null;
+  operational_area_id: string | null;
+  organization_id: string;
+};
+
 const branchCodePattern = /^[A-Z0-9][A-Z0-9-_]{1,30}$/;
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -58,6 +66,46 @@ function normalizeCode(value: string) {
 
 function jsonError(error: string, status: number, missingConfig: string[] = []) {
   return NextResponse.json({ error, missingConfig, ok: false }, { status });
+}
+
+export async function GET() {
+  const actor = await getCurrentAuthorizationActor();
+
+  if (!actor) {
+    return jsonError("Debes iniciar sesion para ver sucursales.", 401);
+  }
+
+  const admin = getSupabaseAdminClient();
+  if (!admin) {
+    return jsonError("Supabase de servidor no esta configurado.", 503, ["SUPABASE_SERVICE_ROLE_KEY"]);
+  }
+
+  const { data, error } = await admin
+    .from("branches")
+    .select("id,organization_id,country_id,company_id,operational_area_id,code,name,city,status,is_enabled,is_demo")
+    .eq("organization_id", actor.scope.organizationId)
+    .eq("is_demo", false)
+    .eq("is_enabled", true)
+    .is("deleted_at", null)
+    .order("name");
+
+  if (error) {
+    return jsonError("No se pudieron leer las sucursales autorizadas.", 500);
+  }
+
+  const items = ((data ?? []) as Array<BranchReadRow & Record<string, unknown>>).filter((branch) =>
+    canPerformAction(actor, "record.read", {
+      scope: {
+        organizationId: branch.organization_id,
+        countryId: branch.country_id,
+        companyId: branch.company_id,
+        operationalAreaId: branch.operational_area_id,
+        branchId: branch.id,
+      },
+    }),
+  );
+
+  return NextResponse.json({ items, ok: true, source: "supabase" });
 }
 
 export async function POST(request: Request) {
