@@ -18,8 +18,6 @@ const saveSchema = z.object({
   operationalAreaId: z.string().uuid().nullable().optional(),
   branchId: z.string().uuid(),
   businessLineId: z.string().uuid(),
-  branchManagerId: z.string().uuid().nullable().optional(),
-  areaManagerId: z.string().uuid().nullable().optional(),
   periodStart: z.string().date(),
   periodEnd: z.string().date(),
   responses: z.record(z.string(), z.unknown()),
@@ -45,11 +43,6 @@ type BusinessLineRow = {
   code: string;
   name: string;
   is_demo: boolean;
-};
-type BranchManagerRow = {
-  id: string;
-  display_name: string;
-  profile_id: string | null;
 };
 type AreaRow = { manager_profile_id: string | null };
 type ProfileRow = { display_name: string | null };
@@ -84,9 +77,10 @@ export async function GET(request: Request) {
       assertRecordAccess(actor, {
         organizationId: submission.organization_id,
         countryId: submission.country_id,
-        companyId: submission.company_id,
-        operationalAreaId: submission.operational_area_id,
-        branchId: submission.branch_id,
+      companyId: submission.company_id,
+      operationalAreaId: submission.operational_area_id,
+      branchId: submission.branch_id,
+      businessLineId: submission.business_line_id,
       });
     } catch {
       return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
@@ -151,6 +145,7 @@ export async function POST(request: Request) {
       companyId: branch.company_id,
       operationalAreaId: branch.operational_area_id,
       branchId: branch.id,
+      businessLineId: businessLine.id,
     });
   } catch {
     return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
@@ -179,40 +174,24 @@ export async function POST(request: Request) {
   if (!formLine) return NextResponse.json({ error: "UNSUPPORTED_BUSINESS_LINE" }, { status: 422 });
 
   const catalogClient = hasSupabaseAdminConfiguration() ? createAdminClient() : supabase;
-  const today = new Date().toISOString().slice(0, 10);
-  const [branchManagersResult, areaResult] = await Promise.all([
+  const [actorProfileResult, areaResult] = await Promise.all([
     catalogClient
-      .from("branch_managers")
-      .select("id,display_name,profile_id")
-      .eq("organization_id", actor.scope.organizationId)
-      .eq("branch_id", branch.id)
-      .eq("is_demo", false)
-      .or(`ends_on.is.null,ends_on.gte.${today}`)
-      .order("display_name"),
+      .from("profiles")
+      .select("display_name")
+      .eq("id", actor.userId)
+      .maybeSingle(),
     branch.operational_area_id
       ? catalogClient.from("operational_areas").select("manager_profile_id").eq("id", branch.operational_area_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
   ]);
-  const branchManagers = (branchManagersResult.data ?? []) as BranchManagerRow[];
+  const actorProfile = (actorProfileResult.data ?? null) as ProfileRow | null;
   const areaRow = (areaResult.data ?? null) as AreaRow | null;
   const areaManagerResult = areaRow?.manager_profile_id
     ? await catalogClient.from("profiles").select("display_name").eq("id", areaRow.manager_profile_id).maybeSingle()
     : { data: null, error: null };
   const areaManager = (areaManagerResult.data ?? null) as ProfileRow | null;
 
-  const selectedBranchManager = input.branchManagerId
-    ? branchManagers.find((item) => (item.profile_id ?? item.id) === input.branchManagerId) ?? null
-    : branchManagers[0] ?? null;
-  const expectedAreaManagerId = areaRow?.manager_profile_id ?? null;
-
-  if (input.branchManagerId && !selectedBranchManager) {
-    return NextResponse.json({ error: "BRANCH_MANAGER_NOT_IN_CATALOG" }, { status: 409 });
-  }
-  if (input.areaManagerId && input.areaManagerId !== expectedAreaManagerId) {
-    return NextResponse.json({ error: "AREA_MANAGER_NOT_IN_CATALOG" }, { status: 409 });
-  }
-
-  const resolvedBranchManager = selectedBranchManager?.display_name ?? "";
+  const resolvedBranchManager = actorProfile?.display_name ?? actor.displayName;
   const resolvedAreaManager = areaManager?.display_name ?? "";
 
   // Scope, managers, zone and dates are always rewritten from trusted catalogs.

@@ -29,7 +29,7 @@ import {
   getMonthlyFormSteps,
   resolveFormBusinessLine,
 } from "@/lib/monthly-form-contract";
-import type { ContextOption, TenantContextOptions } from "@/lib/v7/server/tenant-context";
+import type { TenantContextOptions } from "@/lib/v7/server/tenant-context";
 
 const acceptedFiles = ".xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg";
 const maxFileBytes = 15 * 1024 * 1024;
@@ -200,10 +200,6 @@ function relationName(value: RecentSubmission["branches"]) {
   return value.name ?? "Sin catálogo";
 }
 
-function filterByCompany(items: ContextOption[], companyId: string) {
-  return items.filter((item) => !item.parentId || item.parentId === companyId);
-}
-
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -348,42 +344,34 @@ function FieldInput({
   );
 }
 
+function DerivedContextField({ label, description, value }: { label: string; description: string; value: string }) {
+  return (
+    <div className="grid gap-1.5">
+      <Label>{label}</Label>
+      <div className="min-h-10 rounded-md border bg-muted/40 px-3 py-2 text-sm">{value || "Pendiente de asignación"}</div>
+      <p className="text-xs text-muted-foreground">{description}</p>
+    </div>
+  );
+}
+
 export function MonthlySubmissionCenter({
   options,
   canWrite,
   canPublish,
-  lockedBusinessLineCode,
 }: {
   options: TenantContextOptions;
   canWrite: boolean;
   canPublish: boolean;
-  lockedBusinessLineCode?: "LABORATORY" | "PHYSIOTHERAPY" | "IMAGING";
 }) {
-  const lockedLineOption = lockedBusinessLineCode
-    ? options.businessLines.find((item) => item.code === lockedBusinessLineCode) ?? null
-    : null;
-  const lockedCompanyId = lockedLineOption?.parentId ?? null;
-  const initialCompanyId = lockedCompanyId ?? options.companies[0]?.id ?? "";
-  const initialLineId = lockedLineOption?.id ?? options.businessLines[0]?.id ?? "";
-  const initialBranch = options.branches.find((item) => !initialCompanyId || item.parentId === initialCompanyId) ?? options.branches[0] ?? null;
-  const initialCountryId = initialBranch?.countryId ?? options.operationalAreas.find((item) => !initialCompanyId || item.parentId === initialCompanyId)?.countryId ?? options.countries[0]?.id ?? "";
-  const initialArea = options.operationalAreas.find((item) =>
-    (!initialCompanyId || item.parentId === initialCompanyId)
-    && (!initialCountryId || !item.countryId || item.countryId === initialCountryId),
-  ) ?? null;
-  const coherentInitialBranch = options.branches.find((item) =>
-    (!initialCompanyId || item.parentId === initialCompanyId)
-    && (!initialCountryId || !item.countryId || item.countryId === initialCountryId)
-    && (!initialArea?.id || !item.operationalAreaId || item.operationalAreaId === initialArea.id),
-  ) ?? initialBranch;
-  const [countryId, setCountryId] = useState(initialCountryId);
-  const [companyId, setCompanyId] = useState(initialCompanyId);
-  const [operationalAreaId, setOperationalAreaId] = useState(initialArea?.id ?? "");
-  const [branchId, setBranchId] = useState(coherentInitialBranch?.id ?? "");
-  const [businessLineId, setBusinessLineId] = useState(initialLineId);
+  const assignments = options.monthlyAssignments;
+  const [assignmentId, setAssignmentId] = useState(assignments[0]?.id ?? "");
+  const selectedAssignment = assignments.find((item) => item.id === assignmentId) ?? assignments[0] ?? null;
+  const [countryId, setCountryId] = useState(selectedAssignment?.country.id ?? "");
+  const [companyId, setCompanyId] = useState(selectedAssignment?.company.id ?? "");
+  const [operationalAreaId, setOperationalAreaId] = useState(selectedAssignment?.operationalArea?.id ?? "");
+  const [branchId, setBranchId] = useState(selectedAssignment?.branch.id ?? "");
+  const [businessLineId, setBusinessLineId] = useState(selectedAssignment?.businessLine.id ?? "");
   const [periodMonth, setPeriodMonth] = useState(options.reportingMonths[0]?.id ?? monthValue());
-  const [branchManagerId, setBranchManagerId] = useState("");
-  const [areaManagerId, setAreaManagerId] = useState("");
   const [values, setValues] = useState<Record<string, string>>({});
   const [changeReason, setChangeReason] = useState(changeReasonOptions[0]!);
   const [saved, setSaved] = useState<{ submissionId: string; versionId: string; versionNumber: number; status: string } | null>(null);
@@ -397,40 +385,10 @@ export function MonthlySubmissionCenter({
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
 
-  const companies = useMemo(
-    () => lockedCompanyId
-      ? options.companies.filter((item) => item.id === lockedCompanyId)
-      : options.companies,
-    [lockedCompanyId, options.companies],
-  );
-  const businessLines = useMemo(
-    () => lockedLineOption
-      ? [lockedLineOption]
-      : filterByCompany(options.businessLines, companyId),
-    [companyId, lockedLineOption, options.businessLines],
-  );
-  const operationalAreas = useMemo(
-    () => filterByCompany(options.operationalAreas, companyId).filter((item) => !item.countryId || item.countryId === countryId),
-    [companyId, countryId, options.operationalAreas],
-  );
-  const branches = useMemo(
-    () => filterByCompany(options.branches, companyId)
-      .filter((item) => !item.countryId || item.countryId === countryId)
-      .filter((item) => !operationalAreaId || !item.operationalAreaId || item.operationalAreaId === operationalAreaId),
-    [companyId, countryId, operationalAreaId, options.branches],
-  );
-  const branchManagers = useMemo(
-    () => options.branchManagers.filter((item) => item.branchId === branchId),
-    [branchId, options.branchManagers],
-  );
-  const areaManagers = useMemo(
-    () => options.areaManagers.filter((item) => item.operationalAreaId === operationalAreaId),
-    [operationalAreaId, options.areaManagers],
-  );
-  const selectedBranch = branches.find((item) => item.id === branchId) ?? null;
-  const selectedBranchManager = branchManagers.find((item) => item.id === branchManagerId) ?? branchManagers[0] ?? null;
-  const selectedAreaManager = areaManagers.find((item) => item.id === areaManagerId) ?? areaManagers[0] ?? null;
-  const selectedLineOption = businessLines.find((item) => item.id === businessLineId) ?? null;
+  const selectedBranch = selectedAssignment?.branch ?? null;
+  const selectedBranchManager = selectedAssignment?.branchManager ?? null;
+  const selectedAreaManager = selectedAssignment?.areaManager ?? null;
+  const selectedLineOption = selectedAssignment?.businessLine ?? null;
   const formLine: ImportBusinessLine | null = selectedLineOption ? resolveFormBusinessLine(selectedLineOption) : null;
   const steps = useMemo(() => {
     if (!formLine) return [];
@@ -504,15 +462,15 @@ export function MonthlySubmissionCenter({
     && validAttachments.length >= 1
     && validAttachments.length <= 2
     && hasStructuredAttachment
-    && !hasBlockedAttachment,
+    && !hasBlockedAttachment
+    && Boolean(selectedAreaManager),
   );
 
   const refreshRecent = useCallback(async () => {
-    if (options.isDemo) return;
     setRecentLoading(true);
     try {
-      const query = lockedLineOption?.id
-        ? `?businessLineId=${encodeURIComponent(lockedLineOption.id)}`
+      const query = selectedAssignment
+        ? `?branchId=${encodeURIComponent(selectedAssignment.branch.id)}&businessLineId=${encodeURIComponent(selectedAssignment.businessLine.id)}`
         : "";
       const response = await fetch(`/api/monthly-submissions${query}`, { cache: "no-store" });
       const body = (await response.json()) as { items?: RecentSubmission[] };
@@ -520,43 +478,18 @@ export function MonthlySubmissionCenter({
     } finally {
       setRecentLoading(false);
     }
-  }, [lockedLineOption?.id, options.isDemo]);
+  }, [selectedAssignment]);
 
   // Keep form context on valid concrete options. There is intentionally no
   // “Todos” value here because a monthly closing always belongs to one scope.
   useEffect(() => {
-    if (!options.countries.some((item) => item.id === countryId)) setCountryId(options.countries[0]?.id ?? "");
-  }, [countryId, options.countries]);
-  useEffect(() => {
-    if (!companies.some((item) => item.id === companyId)) setCompanyId(companies[0]?.id ?? "");
-  }, [companies, companyId]);
-  useEffect(() => {
-    if (!businessLines.some((item) => item.id === businessLineId)) setBusinessLineId(businessLines[0]?.id ?? "");
-  }, [businessLineId, businessLines]);
-  useEffect(() => {
     if (currentStep > finalStepIndex) setCurrentStep(0);
   }, [currentStep, finalStepIndex]);
-  useEffect(() => {
-    if (!operationalAreas.some((item) => item.id === operationalAreaId)) setOperationalAreaId(operationalAreas[0]?.id ?? "");
-  }, [operationalAreaId, operationalAreas]);
-  useEffect(() => {
-    if (!branches.some((item) => item.id === branchId)) setBranchId(branches[0]?.id ?? "");
-  }, [branchId, branches]);
   useEffect(() => {
     if (!options.reportingMonths.some((item) => item.id === periodMonth)) {
       setPeriodMonth(options.reportingMonths[0]?.id ?? monthValue());
     }
   }, [options.reportingMonths, periodMonth]);
-  useEffect(() => {
-    if (!branchManagers.some((item) => item.id === branchManagerId)) {
-      setBranchManagerId(branchManagers[0]?.id ?? "");
-    }
-  }, [branchManagerId, branchManagers]);
-  useEffect(() => {
-    if (!areaManagers.some((item) => item.id === areaManagerId)) {
-      setAreaManagerId(areaManagers[0]?.id ?? "");
-    }
-  }, [areaManagerId, areaManagers]);
   useEffect(() => {
     if (currentStep > steps.length) setCurrentStep(steps.length);
   }, [currentStep, steps.length]);
@@ -569,47 +502,16 @@ export function MonthlySubmissionCenter({
     setMessage(null);
   }
 
-  function changeCountry(next: string) {
-    setCountryId(next);
-    const nextAreas = filterByCompany(options.operationalAreas, companyId).filter((item) => !item.countryId || item.countryId === next);
-    const nextAreaId = nextAreas[0]?.id ?? "";
-    setOperationalAreaId(nextAreaId);
-    const nextBranches = filterByCompany(options.branches, companyId)
-      .filter((item) => !item.countryId || item.countryId === next)
-      .filter((item) => !nextAreaId || !item.operationalAreaId || item.operationalAreaId === nextAreaId);
-    setBranchId(nextBranches[0]?.id ?? "");
-    markContextChange();
-  }
-
-  function changeCompany(next: string) {
-    setCompanyId(next);
-    const lines = filterByCompany(options.businessLines, next);
-    setBusinessLineId(lines[0]?.id ?? "");
-    const areas = filterByCompany(options.operationalAreas, next).filter((item) => !item.countryId || item.countryId === countryId);
-    const nextAreaId = areas[0]?.id ?? "";
-    setOperationalAreaId(nextAreaId);
-    const nextBranches = filterByCompany(options.branches, next)
-      .filter((item) => !item.countryId || item.countryId === countryId)
-      .filter((item) => !nextAreaId || !item.operationalAreaId || item.operationalAreaId === nextAreaId);
-    setBranchId(nextBranches[0]?.id ?? "");
+  function changeAssignment(next: string) {
+    const assignment = assignments.find((item) => item.id === next);
+    if (!assignment) return;
+    setAssignmentId(next);
+    setCountryId(assignment.country.id);
+    setCompanyId(assignment.company.id);
+    setOperationalAreaId(assignment.operationalArea?.id ?? "");
+    setBranchId(assignment.branch.id);
+    setBusinessLineId(assignment.businessLine.id);
     setValues({});
-    markContextChange();
-  }
-
-  function changeArea(next: string) {
-    setOperationalAreaId(next);
-    const nextBranches = filterByCompany(options.branches, companyId)
-      .filter((item) => !item.countryId || item.countryId === countryId)
-      .filter((item) => !next || !item.operationalAreaId || item.operationalAreaId === next);
-    setBranchId(nextBranches[0]?.id ?? "");
-    setAreaManagerId("");
-    setBranchManagerId("");
-    markContextChange();
-  }
-
-  function changeBranch(next: string) {
-    setBranchId(next);
-    setBranchManagerId("");
     markContextChange();
   }
 
@@ -637,9 +539,14 @@ export function MonthlySubmissionCenter({
       const response = await fetch(`/api/monthly-submissions?submissionId=${encodeURIComponent(submissionId)}`, { cache: "no-store" });
       const body = (await response.json()) as SubmissionDetail;
       if (!response.ok || !body.submission || !body.version) throw new Error(body.error ?? "No se pudo abrir el cierre.");
-      if (lockedLineOption && body.submission.business_line_id !== lockedLineOption.id) {
-        throw new Error(`Este módulo solo permite cierres de ${lockedLineOption.name}.`);
+      const matchingAssignment = assignments.find((item) =>
+        item.branch.id === body.submission!.branch_id
+        && item.businessLine.id === body.submission!.business_line_id,
+      );
+      if (!matchingAssignment) {
+        throw new Error("Este cierre está fuera de tus asignaciones activas.");
       }
+      setAssignmentId(matchingAssignment.id);
       setCountryId(body.submission.country_id);
       setCompanyId(body.submission.company_id);
       setOperationalAreaId(body.submission.operational_area_id ?? "");
@@ -650,16 +557,6 @@ export function MonthlySubmissionCenter({
         Object.entries(body.version.responses ?? {}).map(([key, value]) => [key, value === null || value === undefined ? "" : String(value)]),
       );
       setValues(loadedResponses);
-      const loadedBranchManager = options.branchManagers.find((item) =>
-        item.branchId === body.submission!.branch_id
-        && item.name === loadedResponses.manager_name,
-      );
-      const loadedAreaManager = options.areaManagers.find((item) =>
-        item.operationalAreaId === body.submission!.operational_area_id
-        && item.name === loadedResponses.area_manager_name,
-      );
-      setBranchManagerId(loadedBranchManager?.id ?? "");
-      setAreaManagerId(loadedAreaManager?.id ?? "");
       setChangeReason(body.version.change_reason ?? changeReasonOptions[0]!);
       setSaved({ submissionId: body.submission.id, versionId: body.version.id, versionNumber: body.version.version_number, status: body.version.status });
       setDirty(false);
@@ -692,8 +589,6 @@ export function MonthlySubmissionCenter({
           operationalAreaId: operationalAreaId || null,
           branchId,
           businessLineId,
-          branchManagerId: selectedBranchManager?.id ?? null,
-          areaManagerId: selectedAreaManager?.id ?? null,
           periodStart: period.start,
           periodEnd: period.end,
           responses,
@@ -869,13 +764,6 @@ export function MonthlySubmissionCenter({
     }
   }
 
-  function changeSelectedManager(kind: "branch" | "area", next: string) {
-    if (kind === "branch") setBranchManagerId(next);
-    else setAreaManagerId(next);
-    setDirty(true);
-    setMessage(null);
-  }
-
   function renderField(field: ManualMonthlyFormField) {
     const disabled = !canWrite || currentVersionPublished;
 
@@ -897,50 +785,39 @@ export function MonthlySubmissionCenter({
 
     if (field.id === "branch_reported") {
       return (
-        <SelectOrFixed
+        <FieldInput
           key={field.id}
-          label={field.label}
-          value={branchId}
-          onChange={changeBranch}
-          options={branches}
-          disabled={disabled}
-          required={field.required}
-          description="Las opciones dependen de tu rol, país, empresa y área asignados."
-          testId="monthly-branch"
+          field={field}
+          value=""
+          onChange={() => undefined}
+          disabled
+          derivedValue={selectedBranch?.name ?? "Pendiente de asignación"}
         />
       );
     }
 
     if (field.id === "manager_name") {
       return (
-        <SelectOrFixed
+        <FieldInput
           key={field.id}
-          label={field.label}
-          value={selectedBranchManager?.id ?? ""}
-          onChange={(next) => changeSelectedManager("branch", next)}
-          options={branchManagers}
-          disabled={disabled}
-          required={field.required}
-          description="Catálogo importado desde la asignación oficial de la sucursal."
-          emptyText="La sucursal seleccionada no tiene gerente asignado. Debe completarse la asignación antes de publicar."
-          testId="monthly-branch-manager"
+          field={field}
+          value=""
+          onChange={() => undefined}
+          disabled
+          derivedValue={selectedBranchManager?.name ?? "Pendiente de asignación"}
         />
       );
     }
 
     if (field.id === "area_manager_name") {
       return (
-        <SelectOrFixed
+        <FieldInput
           key={field.id}
-          label={field.label}
-          value={selectedAreaManager?.id ?? ""}
-          onChange={(next) => changeSelectedManager("area", next)}
-          options={areaManagers}
-          disabled={disabled}
-          required={field.required}
-          description="Catálogo importado desde la asignación oficial del área operativa."
-          emptyText="El área seleccionada no tiene gerente asignado. Debe completarse la asignación antes de publicar."
-          testId="monthly-area-manager"
+          field={field}
+          value=""
+          onChange={() => undefined}
+          disabled
+          derivedValue={selectedAreaManager?.name ?? "Pendiente de asignación"}
         />
       );
     }
@@ -1012,16 +889,7 @@ export function MonthlySubmissionCenter({
     );
   }
 
-  if (options.isDemo) {
-    return (
-      <Card>
-        <CardHeader><CardTitle>Formulario mensual</CardTitle><CardDescription>El entorno DEMO conserva referencias visuales, pero no escribe datos simulados en la organización real.</CardDescription></CardHeader>
-        <CardContent><Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">DEMO · solo referencia</Badge></CardContent>
-      </Card>
-    );
-  }
-
-  if (options.countries.length === 0 || options.companies.length === 0 || options.branches.length === 0 || options.businessLines.length === 0) {
+  if (!selectedAssignment) {
     return (
       <Card>
         <CardHeader><CardTitle>Formulario mensual pendiente de estructura</CardTitle><CardDescription>Antes de capturar cierres debe existir al menos un país, empresa, sucursal activa y línea de negocio dentro de tu alcance.</CardDescription></CardHeader>
@@ -1049,11 +917,11 @@ export function MonthlySubmissionCenter({
           </div>
         </CardHeader>
         <CardContent className="grid gap-5">
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <SelectOrFixed testId="monthly-country" label="País" value={countryId} onChange={changeCountry} options={options.countries} disabled={!canWrite && Boolean(saved)} required />
-            <SelectOrFixed testId="monthly-company" label="Empresa / unidad" value={companyId} onChange={changeCompany} options={companies} disabled={!canWrite && Boolean(saved)} required />
-            <SelectOrFixed testId="monthly-area" label="Área operativa" value={operationalAreaId} onChange={changeArea} options={operationalAreas} disabled={!canWrite && Boolean(saved)} required />
-            <SelectOrFixed testId="monthly-line" label="Línea de negocio" value={businessLineId} onChange={(next) => { setBusinessLineId(next); setValues({}); markContextChange(); }} options={businessLines} disabled={!canWrite && Boolean(saved)} required />
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4" data-testid="monthly-derived-context">
+            {assignments.length > 1 ? <SelectOrFixed testId="monthly-assignment" label="Asignación" value={selectedAssignment.id} onChange={changeAssignment} options={assignments.map((item) => ({ id: item.id, name: `${item.branch.name} · ${item.businessLine.name}` }))} disabled={!canWrite && Boolean(saved)} required description="Solo se muestran tus asignaciones activas de sucursal y línea." /> : <DerivedContextField label="Asignación" description="Derivada de tu asignación activa." value={`${selectedAssignment.branch.name} · ${selectedAssignment.businessLine.name}`} />}
+            <DerivedContextField label="País" description="Derivado de tu asignación activa." value={selectedAssignment.country.name} />
+            <DerivedContextField label="Empresa / unidad" description="Derivada de tu asignación activa." value={selectedAssignment.company.name} />
+            <DerivedContextField label="Área operativa" description="Derivada de la sucursal asignada." value={selectedAssignment.operationalArea?.name ?? "Pendiente de asignación"} />
           </div>
 
           <div className="rounded-lg border bg-muted/20 p-3">
@@ -1222,6 +1090,7 @@ export function MonthlySubmissionCenter({
             </div>
             <div className="rounded-lg border bg-muted/20 p-3 text-xs text-muted-foreground">
               <p>Publicación disponible cuando: campos obligatorios 100%, versión guardada, 1–2 adjuntos válidos, al menos un Excel/CSV y sin archivos bloqueados.</p>
+              {!selectedAreaManager && <p className="mt-1 font-medium text-amber-800">Pendiente de asignación: un administrador debe asignar el Gerente de Área antes de publicar. Puedes guardar el borrador.</p>}
               {!canPublish && <p className="mt-1 font-medium text-foreground">Tu rol puede preparar el cierre, pero la publicación oficial requiere un rol aprobador.</p>}
             </div>
           </div>
@@ -1238,12 +1107,12 @@ export function MonthlySubmissionCenter({
           <div className="flex flex-wrap gap-2">
             {canWrite && (
               <Button type="button" onClick={() => void save()} disabled={busy !== null || (!dirty && Boolean(saved))}>
-                {busy === "save" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />} Guardar nueva versión
+                {busy === "save" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />} Guardar borrador
               </Button>
             )}
             {canPublish && (
               <Button type="button" variant="outline" onClick={() => void publish()} disabled={busy !== null || !canPublishCurrent}>
-                {busy === "publish" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />} Publicar cierre oficial
+                {busy === "publish" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />} Publicar cierre
               </Button>
             )}
             {saved && (

@@ -23,7 +23,8 @@ const router = read("components/monthly-closure-router.tsx");
 assert.match(router, /MonthlySubmissionCenter/);
 assert.match(router, /resolveV7ActorFromCurrent/);
 assert.match(router, /if \(!isDemoRuntimeEnvironment\(\)\)/);
-assert.match(router, /lockedBusinessLineCode/);
+assert.match(router, /monthlyAssignments/);
+assert.match(router, /actor\.roleKey !== "gerente_sucursal"/);
 
 const form = read("components/production/monthly-submission-center.tsx");
 assert.match(form, /\/api\/monthly-submissions/);

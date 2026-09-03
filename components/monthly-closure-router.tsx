@@ -91,27 +91,37 @@ export async function MonthlyClosureRouter({
   const selectedLine = requestedLine(line) ?? scopedCompanyUnit(actor);
 
   if (!isDemoRuntimeEnvironment()) {
+    if (mode !== "new-closure") {
+      return (
+        <section className="flex w-full flex-col gap-4 px-4 py-6 lg:px-6">
+          <div className="rounded-md border bg-card p-6">
+            <h1 className="text-xl font-semibold tracking-normal">Consulta de cierres</h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">Este módulo es de consulta. La captura mensual está disponible únicamente para el gerente de sucursal asignado.</p>
+          </div>
+        </section>
+      );
+    }
+
+    if (actor.roleKey !== "gerente_sucursal") {
+      return (
+        <section className="flex w-full flex-col gap-4 px-4 py-6 lg:px-6">
+          <div className="rounded-md border border-destructive/30 bg-card p-6">
+            <h1 className="text-xl font-semibold tracking-normal">Acceso no autorizado</h1>
+            <p className="mt-2 text-sm leading-6 text-muted-foreground">El formulario mensual está reservado para gerentes de sucursal con una asignación activa.</p>
+          </div>
+        </section>
+      );
+    }
+
     const v7Actor = await resolveV7ActorFromCurrent(actor);
     const options = await getTenantContextOptions(v7Actor);
-    const lockedBusinessLineCode =
-      selectedLine === "laboratorio"
-        ? "LABORATORY"
-        : selectedLine === "imagenes"
-          ? "IMAGING"
-          : selectedLine === "fisioterapia"
-            ? "PHYSIOTHERAPY"
-            : undefined;
-
-    if (!lockedBusinessLineCode) {
+    if (options.monthlyAssignments.length === 0) {
       return (
         <section className="flex w-full flex-col gap-4 px-4 py-6 lg:px-6">
           <div className="rounded-md border border-dashed bg-card p-6">
-            <h1 className="text-xl font-semibold tracking-normal">
-              Selecciona una linea de negocio
-            </h1>
+            <h1 className="text-xl font-semibold tracking-normal">Formulario mensual pendiente de asignación</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-muted-foreground">
-              El cierre mensual necesita una linea en el contexto de la URL o
-              en el alcance autorizado del usuario.
+              No se encontró una asignación activa de sucursal y línea de negocio para tu cuenta. Solicita a un administrador que complete tu asignación; no se muestran catálogos de respaldo.
             </p>
           </div>
         </section>
@@ -123,7 +133,6 @@ export async function MonthlyClosureRouter({
         options={options}
         canWrite={canPerformV7Action(v7Actor, "monthly_submission.write")}
         canPublish={canPerformV7Action(v7Actor, "monthly_submission.publish")}
-        lockedBusinessLineCode={lockedBusinessLineCode}
       />
     );
   }

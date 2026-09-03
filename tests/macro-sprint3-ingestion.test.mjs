@@ -342,7 +342,7 @@ const otherBranchCsv = validLabCsv("ORD-BRANCH-SCOPE").replace(
   labBranchName,
   "SS - Escalon - L001",
 );
-const deniedBranch = ingestTabularFile({
+assert.throws(() => ingestTabularFile({
   actor: branchManager,
   buffer: Buffer.from(otherBranchCsv, "utf8"),
   contentType: "text/csv",
@@ -351,12 +351,7 @@ const deniedBranch = ingestTabularFile({
   period: "2026-07",
   scope,
   sourceId: "branch-scope",
-});
-assert.equal(deniedBranch.importRecord.status, "BLOCKED");
-assert.equal(
-  deniedBranch.issues.some((issue) => issue.code === "branch_scope_mismatch"),
-  true,
-);
+}), /no autorizado/);
 
 const billingConnector = getDataConnector("billing-demo-adapter");
 assert.ok(billingConnector);

@@ -126,13 +126,9 @@ export const navigationItems: NavigationItem[] = [
     href: "/protected/importaciones",
     icon: Import,
     group: "operacion",
-    allowedRoles: [
-      ...adminRoles,
-      "gerente_operaciones",
-      "gerente_area",
-      "gerente_sucursal",
-      "usuario_operativo",
-    ],
+    // Importing source files is an administrative ingestion operation. It is
+    // deliberately separate from the monthly branch close workflow.
+    allowedRoles: adminRoles,
   },
   {
     title: "Historial de cierres",
@@ -268,10 +264,7 @@ export const navigationItems: NavigationItem[] = [
     href: "/protected/plantillas",
     icon: ClipboardCheck,
     group: "datos",
-    allowedRoles: [
-      ...adminRoles,
-      "usuario_operativo",
-    ],
+    allowedRoles: ["gerente_sucursal"],
   },
   {
     title: "Conectores",
