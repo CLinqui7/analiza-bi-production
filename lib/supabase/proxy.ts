@@ -5,6 +5,7 @@ import { localSessionCookieName } from "@/lib/auth/local-session-cookie";
 import { hasEnvVars } from "../utils";
 
 const publicAuthApiPaths = new Set([
+  "/api/health",
   "/api/auth/accept-invitation",
   "/api/auth/demo-session",
   "/api/auth/local-login",

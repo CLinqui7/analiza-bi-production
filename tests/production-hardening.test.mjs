@@ -99,6 +99,13 @@ for (const path of [
   assert.ok(!source.includes("NEXT_PUBLIC_SUPABASE_SERVICE_ROLE_KEY"));
 }
 
+const supabaseProxy = read("lib/supabase/proxy.ts");
+assert.match(
+  supabaseProxy,
+  /"\/api\/health"/,
+  "The unauthenticated health probe must not be redirected to login.",
+);
+
 const clientFiles = [...[
   "components",
   "app",
