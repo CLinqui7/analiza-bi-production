@@ -2,9 +2,11 @@
 node_modules/
 .next/
 .netlify/
+.temp/
 .vercel/
 coverage/
 artifacts/
+.codex/
 .qa-final/
 tsconfig.tsbuildinfo
 
