@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { rollbackImport } from "@/lib/data-ingestion/platform";
 import { requireProtectedAccess } from "@/lib/server/authorization";
+import { canPerformAction } from "@/lib/security/authorization-policy";
 
 type ImportRouteContext = {
   params: Promise<{
@@ -11,6 +12,9 @@ type ImportRouteContext = {
 
 export async function POST(request: Request, context: ImportRouteContext) {
   const actor = await requireProtectedAccess();
+  if (!canPerformAction(actor, "route.access", { pathname: "/protected/importaciones" })) {
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  }
   const { importId } = await context.params;
   const body = (await request.json().catch(() => ({}))) as {
     reason?: unknown;

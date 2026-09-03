@@ -79,7 +79,7 @@ for (const requiredConnectorsText of [
 for (const requiredImportText of [
   "roleKey !== \"gerente_operaciones\"",
   "Fuentes automaticas pendientes",
-  "Formulario de importaciones",
+  "Control de carga",
 ]) {
   if (!readFileSync("components/import-operations-dashboard.tsx", "utf8").includes(requiredImportText)) {
     throw new Error(`Import operations dashboard is missing: ${requiredImportText}`);

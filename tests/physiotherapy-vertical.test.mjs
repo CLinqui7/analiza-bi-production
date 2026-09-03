@@ -425,12 +425,12 @@ assert.deepEqual(
   branchNavigation,
   [
     "/protected/mi-sucursal",
-    "/protected/importaciones",
     "/protected/cierres",
     "/protected/resultados",
+    "/protected/plantillas",
     "/protected/configuracion",
   ],
-  "Branch manager navigation must keep one branch report and avoid duplicated goals/insights tabs.",
+  "Branch manager navigation must expose the scoped monthly form and avoid administrative ingestion.",
 );
 
 for (const verticalDashboard of [

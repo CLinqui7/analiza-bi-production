@@ -41,7 +41,7 @@ export async function GET(request: Request, context: { params: Promise<{ submiss
   if (!loaded) return NextResponse.json({ error: "SUBMISSION_VERSION_NOT_FOUND" }, { status: 404 });
   const { supabase, submission } = loaded;
   try {
-    assertRecordAccess(actor, { organizationId: submission.organization_id, countryId: submission.country_id, companyId: submission.company_id, operationalAreaId: submission.operational_area_id, branchId: submission.branch_id });
+    assertRecordAccess(actor, { organizationId: submission.organization_id, countryId: submission.country_id, companyId: submission.company_id, operationalAreaId: submission.operational_area_id, branchId: submission.branch_id, businessLineId: submission.business_line_id });
   } catch {
     return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
   }
@@ -81,7 +81,7 @@ export async function DELETE(request: Request, context: { params: Promise<{ subm
   const { supabase, submission, version } = loaded;
   if (version.status === "published") return NextResponse.json({ error: "PUBLISHED_VERSION_IMMUTABLE" }, { status: 409 });
   try {
-    assertRecordAccess(actor, { organizationId: submission.organization_id, countryId: submission.country_id, companyId: submission.company_id, operationalAreaId: submission.operational_area_id, branchId: submission.branch_id });
+    assertRecordAccess(actor, { organizationId: submission.organization_id, countryId: submission.country_id, companyId: submission.company_id, operationalAreaId: submission.operational_area_id, branchId: submission.branch_id, businessLineId: submission.business_line_id });
   } catch {
     return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
   }

@@ -25,7 +25,6 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ManualMonthlyEntryDashboard } from "@/components/manual-monthly-entry-dashboard";
 import { ReadableTabs } from "@/components/readable-tabs";
 import {
   bulkImportDocuments,
@@ -537,9 +536,7 @@ function DocumentRow({
             <h3 className="font-semibold tracking-normal">
               {importDocument.name}
             </h3>
-            <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
-              DEMO
-            </Badge>
+            <Badge variant="outline">Catálogo operativo</Badge>
           </div>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             {importDocument.purpose}
@@ -673,9 +670,7 @@ function DocumentDetail({
     <aside className="grid gap-4 rounded-md border bg-card p-4">
       <div className="grid gap-2">
         <div className="flex flex-wrap items-center gap-2">
-          <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
-            DEMO
-          </Badge>
+          <Badge variant="outline">Catálogo operativo</Badge>
           <Badge variant="outline">{importDocument.businessLine}</Badge>
           <Badge className={statusClass(status)}>{status}</Badge>
           <Badge className={riskClass(importDocument.piiRisk)}>
@@ -985,9 +980,7 @@ function ConnectorPanel({
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <div className="mb-2 flex flex-wrap items-center gap-2">
-                  <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100">
-                    DEMO
-                  </Badge>
+                  <Badge variant="outline">Conector</Badge>
                   <Badge variant="outline">{connector.businessLine}</Badge>
                   <Badge className={statusClass(connector.status)}>
                     {connector.status}
@@ -1103,7 +1096,7 @@ function BatchHistorySection() {
     <section className="rounded-md border bg-card p-4">
       <div className="mb-4 flex items-center gap-2 text-sm font-medium">
         <History className="size-4 text-primary" />
-        Historial reciente DEMO
+        Historial reciente
       </div>
       <div className="grid gap-3 md:hidden">
         {importBatchRuns.map((batchRun) => (
@@ -1237,7 +1230,7 @@ export function ImportOperationsDashboard({
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(allStatuses);
   const [frequencyFilter, setFrequencyFilter] =
     useState<FrequencyFilter>(allFrequencies);
-  const [activeSection, setActiveSection] = useState("formulario-importaciones");
+  const [activeSection, setActiveSection] = useState("control-importaciones");
   const [selectedDocumentId, setSelectedDocumentId] = useState(
     bulkImportDocuments[0]?.id ?? "",
   );
@@ -1256,7 +1249,7 @@ export function ImportOperationsDashboard({
     Record<string, BulkImportStatus>
   >({});
   const [notice, setNotice] = useState(
-    "El formulario mensual es la via manual principal. Excel queda como respaldo para migraciones o correcciones especiales.",
+    "Carga administrativa de fuentes operativas. Los cierres mensuales se gestionan en su módulo separado.",
   );
 
   useEffect(() => {
@@ -1359,7 +1352,7 @@ export function ImportOperationsDashboard({
     anchor.download = `${sanitizeDownloadName(importDocument.name)}.csv`;
     anchor.click();
     URL.revokeObjectURL(url);
-    setNotice(`Estructura DEMO descargada para ${importDocument.name}.`);
+    setNotice(`Estructura descargada para ${importDocument.name}.`);
   }
 
   function handleFileChange(
@@ -1520,7 +1513,7 @@ export function ImportOperationsDashboard({
     setDocumentStatus(
       importDocument,
       "Reemplazado",
-      `${importDocument.name} quedo marcado como version reemplazada DEMO con auditoria pendiente.`,
+      `${importDocument.name} quedó marcado como versión reemplazada con auditoría pendiente.`,
     );
   }
 
@@ -1614,9 +1607,7 @@ export function ImportOperationsDashboard({
       <div className="grid gap-4 xl:grid-cols-[1fr_360px] xl:items-end">
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap items-center gap-2">
-            <Badge className="w-fit bg-amber-100 text-amber-800 hover:bg-amber-100">
-              Entorno DEMO
-            </Badge>
+            <Badge variant="outline">Administración de ingestión</Badge>
             <Badge variant="outline">Gerente de operaciones</Badge>
             <Badge variant="outline">Webmaster / Administrador</Badge>
           </div>
@@ -1638,12 +1629,6 @@ export function ImportOperationsDashboard({
         activeTabId={activeSection}
         onTabChange={setActiveSection}
         tabs={[
-          {
-            id: "formulario-importaciones",
-            label: "Formulario de importaciones",
-            description: "Entrada principal que alimenta el sistema por sucursal.",
-            children: <ManualMonthlyEntryDashboard />,
-          },
           {
             id: "control-importaciones",
             label: "Control de carga",

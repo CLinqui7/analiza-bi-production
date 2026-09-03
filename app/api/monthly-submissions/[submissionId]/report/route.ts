@@ -80,6 +80,7 @@ export async function GET(request: Request, context: RouteContext) {
       companyId: submission.company_id,
       operationalAreaId: submission.operational_area_id,
       branchId: submission.branch_id,
+      businessLineId: submission.business_line_id,
     });
   } catch {
     return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });

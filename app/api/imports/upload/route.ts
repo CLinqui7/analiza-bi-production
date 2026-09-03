@@ -9,6 +9,7 @@ import {
   type IngestionDatasetType,
 } from "@/lib/data-ingestion/templates";
 import { requireProtectedAccess } from "@/lib/server/authorization";
+import { canPerformAction } from "@/lib/security/authorization-policy";
 import { assertScopedBranchReadyForOperationalData } from "@/lib/server/branch-governance";
 import { getMissingDatabaseConfig } from "@/lib/server/database";
 import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
@@ -47,6 +48,9 @@ function toSafePreview(result: ReturnType<typeof ingestTabularFile>) {
 
 export async function POST(request: Request) {
   const actor = await requireProtectedAccess();
+  if (!canPerformAction(actor, "route.access", { pathname: "/protected/importaciones" })) {
+    return NextResponse.json({ error: "FORBIDDEN" }, { status: 403 });
+  }
   const formData = await request.formData();
   const fileValue = formData.get("file");
   const datasetType = readFormString(formData, "dataset_type") as

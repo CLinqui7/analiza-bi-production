@@ -102,6 +102,7 @@ export async function POST(request: Request) {
       companyId: submission.company_id,
       operationalAreaId: submission.operational_area_id,
       branchId: submission.branch_id,
+      businessLineId: submission.business_line_id,
     });
   } catch {
     return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
@@ -116,6 +117,13 @@ export async function POST(request: Request) {
   const line = lineData as BusinessLine;
   const formLine = resolveFormBusinessLine(line);
   if (!formLine) return NextResponse.json({ error: "UNSUPPORTED_BUSINESS_LINE" }, { status: 422 });
+
+  if (!String(version.responses.area_manager_name ?? "").trim()) {
+    return NextResponse.json({
+      error: "AREA_MANAGER_ASSIGNMENT_REQUIRED",
+      message: "No se puede publicar hasta que la sucursal tenga un Gerente de Área asignado.",
+    }, { status: 409 });
+  }
 
   const contract = validateMonthlyFormContract({ line: formLine, responses: version.responses, requireComplete: true });
   if (contract.missing.length > 0 || contract.invalid.length > 0) {

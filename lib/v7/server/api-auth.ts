@@ -51,19 +51,32 @@ export async function resolveV7ActorFromCurrent(
     return base;
   }
 
-  const { data: grantData } = await admin
+  const { data: userRoleGrantData } = await admin
     .from("user_roles")
-    .select("country_id,company_id,operational_area_id,branch_id")
+    .select("country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code")
     .eq("user_id", actor.userId)
     .eq("organization_id", actor.scope.organizationId)
     .eq("role_id", role.id)
     .eq("status", "active");
 
-  const grants = (grantData ?? []) as Array<{
+  const { data: managerAssignmentData } = await admin
+    .from("manager_assignments")
+    .select("country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code")
+    .eq("profile_id", actor.userId)
+    .eq("organization_id", actor.scope.organizationId)
+    .eq("role_id", role.id)
+    .eq("status", "active");
+
+  const grants = [
+    ...(userRoleGrantData ?? []),
+    ...(managerAssignmentData ?? []),
+  ] as Array<{
     country_id: string | null;
     company_id: string | null;
     operational_area_id: string | null;
     branch_id: string | null;
+    business_line_id: string | null;
+    business_line_code: string | null;
   }>;
 
   const scopeGrants = grants.map((grant) => ({
@@ -72,12 +85,23 @@ export async function resolveV7ActorFromCurrent(
     companyId: grant.company_id,
     operationalAreaId: grant.operational_area_id,
     branchId: grant.branch_id,
+    businessLineId: grant.business_line_id,
+    businessLineCode: grant.business_line_code,
   }));
+
+  const distinctScopeGrants = Array.from(
+    new Map(
+      scopeGrants.map((grant) => [
+        [grant.organizationId, grant.countryId, grant.companyId, grant.operationalAreaId, grant.branchId, grant.businessLineId].join("|"),
+        grant,
+      ]),
+    ).values(),
+  );
 
   return {
     ...base,
     roleId: role.id,
-    scopeGrants: scopeGrants.length > 0 ? scopeGrants : base.scopeGrants,
+    scopeGrants: distinctScopeGrants.length > 0 ? distinctScopeGrants : base.scopeGrants,
   };
 }
 

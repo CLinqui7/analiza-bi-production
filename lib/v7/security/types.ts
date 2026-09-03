@@ -17,6 +17,8 @@ export type ScopeBoundary = {
   companyId?: string | null;
   operationalAreaId?: string | null;
   branchId?: string | null;
+  businessLineId?: string | null;
+  businessLineCode?: string | null;
 };
 
 export type Actor = {

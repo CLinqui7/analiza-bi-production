@@ -424,9 +424,9 @@ for (const route of [
 }
 assert.ok(
   readWorkspaceFile("app/protected/cierres/nuevo/page.tsx").includes(
-    "redirect(`/protected/importaciones",
+    "redirect(`/protected/plantillas",
   ),
-  "The legacy new closure page must redirect to Importaciones.",
+  "The legacy new closure page must redirect to the scoped monthly form.",
 );
 
 for (const dashboard of [

@@ -15,7 +15,7 @@ const schema = z.object({
   mimeType: z.string().max(200).optional(),
 });
 
-type Submission = { id: string; organization_id: string; country_id: string; company_id: string; operational_area_id: string | null; branch_id: string; is_demo: boolean };
+type Submission = { id: string; organization_id: string; country_id: string; company_id: string; operational_area_id: string | null; branch_id: string; business_line_id: string; is_demo: boolean };
 type Version = { id: string; submission_id: string; status: string };
 
 function sanitizedName(value: string) {
@@ -40,7 +40,7 @@ export async function POST(request: Request, context: { params: Promise<{ submis
   const { submissionId } = await context.params;
   const supabase = await createClient();
   const [{ data: submissionData }, { data: versionData }] = await Promise.all([
-    supabase.from("manual_monthly_submissions").select("id,organization_id,country_id,company_id,operational_area_id,branch_id,is_demo").eq("id", submissionId).maybeSingle(),
+    supabase.from("manual_monthly_submissions").select("id,organization_id,country_id,company_id,operational_area_id,branch_id,business_line_id,is_demo").eq("id", submissionId).maybeSingle(),
     supabase.from("manual_monthly_submission_versions").select("id,submission_id,status").eq("id", parsed.data.versionId).maybeSingle(),
   ]);
   if (!submissionData || !versionData) return NextResponse.json({ error: "SUBMISSION_VERSION_NOT_FOUND" }, { status: 404 });
@@ -50,7 +50,7 @@ export async function POST(request: Request, context: { params: Promise<{ submis
   if (version.status === "published") return NextResponse.json({ error: "PUBLISHED_VERSION_IMMUTABLE" }, { status: 409 });
 
   try {
-    assertRecordAccess(actor, { organizationId: submission.organization_id, countryId: submission.country_id, companyId: submission.company_id, operationalAreaId: submission.operational_area_id, branchId: submission.branch_id });
+    assertRecordAccess(actor, { organizationId: submission.organization_id, countryId: submission.country_id, companyId: submission.company_id, operationalAreaId: submission.operational_area_id, branchId: submission.branch_id, businessLineId: submission.business_line_id });
   } catch {
     return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
   }

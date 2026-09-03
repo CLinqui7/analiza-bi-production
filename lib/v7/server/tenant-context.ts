@@ -32,6 +32,18 @@ export type ManagerOption = {
   operationalAreaId?: string | null;
 };
 
+/** A single real closing authority: one branch and one business line. */
+export type MonthlyAssignment = {
+  id: string;
+  country: ContextOption;
+  company: ContextOption;
+  operationalArea: ContextOption | null;
+  branch: ContextOption;
+  businessLine: ContextOption;
+  branchManager: ManagerOption;
+  areaManager: ManagerOption | null;
+};
+
 export type TenantContextOptions = {
   countries: ContextOption[];
   companies: ContextOption[];
@@ -40,6 +52,7 @@ export type TenantContextOptions = {
   branches: ContextOption[];
   areaManagers: ManagerOption[];
   branchManagers: ManagerOption[];
+  monthlyAssignments: MonthlyAssignment[];
   reportingMonths: ContextOption[];
   isDemo: boolean;
 };
@@ -91,6 +104,7 @@ function matchesGrant(grant: ScopeBoundary, target: ScopeBoundary) {
     && (!grant.companyId || grant.companyId === target.companyId)
     && (!grant.operationalAreaId || grant.operationalAreaId === target.operationalAreaId)
     && (!grant.branchId || grant.branchId === target.branchId)
+    && (!grant.businessLineId || grant.businessLineId === target.businessLineId)
   );
 }
 
@@ -147,6 +161,7 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
       })),
       areaManagers: [],
       branchManagers: [],
+      monthlyAssignments: [],
       reportingMonths: reportingMonths(),
       isDemo: true,
     };
@@ -236,7 +251,7 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
       .map((item) => item.profile_id)
       .filter((value): value is string => Boolean(value)),
   ));
-  const profileIds = Array.from(new Set([...areaManagerIds, ...branchManagerProfileIds]));
+  const profileIds = Array.from(new Set([...areaManagerIds, ...branchManagerProfileIds, actor.userId]));
   const profilesResult = profileIds.length > 0
     ? await supabase.from("profiles").select("id,display_name,email,status").in("id", profileIds)
     : { data: [] };
@@ -269,6 +284,53 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
       };
     });
 
+  const countryById = new Map(countries.map((item) => [item.id, item]));
+  const companyById = new Map(companies.map((item) => [item.id, item]));
+  const branchById = new Map(branches.map((item) => [item.id, item]));
+  const areaById = new Map(areas.map((item) => [item.id, item]));
+  const lineById = new Map(lines.map((item) => [item.id, item]));
+  const actorProfile = profileById.get(actor.userId);
+  const ownManager: ManagerOption = {
+    id: actor.userId,
+    name: actorProfile?.display_name?.trim() || actor.displayName || "Gerente de sucursal",
+    email: actorProfile?.email ?? actor.email,
+  };
+  const monthlyAssignments = actor.roleKey !== "gerente_sucursal"
+    ? []
+    : Array.from(new Map(
+      grantsFor(actor)
+        .filter((grant) => Boolean(grant.branchId && grant.businessLineId))
+        .flatMap((grant) => {
+          const branch = grant.branchId ? branchById.get(grant.branchId) : null;
+          const line = grant.businessLineId ? lineById.get(grant.businessLineId) : null;
+          const country = branch ? countryById.get(branch.country_id) : null;
+          const company = branch ? companyById.get(branch.company_id) : null;
+          const area = branch?.operational_area_id ? areaById.get(branch.operational_area_id) : null;
+          if (!branch || !line || !country || !company || !actorCanSee(actor, {
+            organizationId,
+            countryId: branch.country_id,
+            companyId: branch.company_id,
+            operationalAreaId: branch.operational_area_id,
+            branchId: branch.id,
+            businessLineId: line.id,
+          })) return [];
+          const areaManager = area?.manager_profile_id
+            ? areaManagers.find((item) => item.id === area.manager_profile_id) ?? null
+            : null;
+          const assignment: MonthlyAssignment = {
+            id: `${branch.id}:${line.id}`,
+            country: { id: country.id, name: country.name, code: country.iso2 },
+            company: { id: company.id, name: company.name, code: company.key },
+            operationalArea: area ? { id: area.id, name: area.name, code: area.code, parentId: area.company_id, countryId: area.country_id } : null,
+            branch: { id: branch.id, name: branch.name, code: branch.code, parentId: branch.company_id, countryId: branch.country_id, operationalAreaId: branch.operational_area_id, city: branch.city, status: branch.status },
+            businessLine: { id: line.id, name: line.name, code: line.code, parentId: line.company_id },
+            branchManager: ownManager,
+            areaManager,
+          };
+          return [[assignment.id, assignment] as const];
+        }),
+    ).values()).sort((left, right) => left.branch.name.localeCompare(right.branch.name) || left.businessLine.name.localeCompare(right.businessLine.name));
+
   return {
     countries: visibleCountries.map((item) => ({ id: item.id, name: item.name, code: item.iso2 })),
     companies: visibleCompanies.map((item) => ({ id: item.id, name: item.name, code: item.key })),
@@ -292,6 +354,7 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
     })),
     areaManagers: uniqueManagerOptions(areaManagers),
     branchManagers: uniqueManagerOptions(branchManagers),
+    monthlyAssignments,
     reportingMonths: reportingMonths(),
     isDemo: false,
   };

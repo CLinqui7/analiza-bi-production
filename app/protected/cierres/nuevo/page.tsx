@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { requireProtectedPath } from "@/lib/server/authorization";
 
 type NewClosurePageProps = {
   searchParams?: Promise<{
@@ -17,6 +18,7 @@ function readFirstParam(value: string | string[] | undefined) {
 export default async function NewClosurePage({
   searchParams,
 }: NewClosurePageProps) {
+  await requireProtectedPath("/protected/cierres/nuevo");
   const params = searchParams ? await searchParams : {};
   const line = readFirstParam(params.line);
   const query = new URLSearchParams();
@@ -27,5 +29,5 @@ export default async function NewClosurePage({
 
   const queryString = query.toString();
 
-  redirect(`/protected/importaciones${queryString ? `?${queryString}` : ""}`);
+  redirect(`/protected/plantillas${queryString ? `?${queryString}` : ""}`);
 }

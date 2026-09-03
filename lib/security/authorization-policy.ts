@@ -54,20 +54,13 @@ export type AuthorizationTarget = {
 };
 
 const protectedBasePaths = new Set(["/protected", "/protected/context"]);
-const importMutationRoles: RoleKey[] = [
-  "super_admin",
-  "webmaster_admin",
-  "gerente_operaciones",
-  "gerente_area",
-  "gerente_sucursal",
-  "usuario_operativo",
-];
+const importMutationRoles: RoleKey[] = ["super_admin", "webmaster_admin"];
 const connectorMutationRoles: RoleKey[] = [
   "super_admin",
   "webmaster_admin",
 ];
 const routeAccessAliases = new Map<string, string>([
-  ["/protected/cierres/nuevo", "/protected/importaciones"],
+  ["/protected/cierres/nuevo", "/protected/plantillas"],
 ]);
 
 function normalizePathname(pathname: string) {
@@ -109,23 +102,14 @@ export function canAccessProtectedPath(
     return true;
   }
 
-  if (
-    normalizedPathname === "/protected/cierres/nuevo" &&
-    actor.roleKey === "gerente_area"
-  ) {
-    return false;
-  }
-
-  if (isSuperAdministrator(actor.roleKey)) {
-    return accessPathname.startsWith("/protected");
-  }
-
   const navigationItem = findNavigationItemForPath(accessPathname);
 
   if (!navigationItem) {
     return false;
   }
 
+  // Protected paths are explicit allow-lists. Administrators do not bypass
+  // the ordinary monthly workflow and cannot enter it through a direct URL.
   return navigationItem.allowedRoles.includes(actor.roleKey);
 }
 
