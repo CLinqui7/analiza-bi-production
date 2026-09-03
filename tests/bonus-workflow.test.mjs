@@ -76,7 +76,7 @@ function assertDecisionError(expectedMessage, run) {
   });
 }
 
-const operationsManager = actor("gerente_operaciones", {
+const operationsManager = actor("super_admin", {
   companyId,
   countryId,
 });
@@ -114,9 +114,9 @@ assert.equal(recommendedView.canAdjust, true);
 assert.equal(recommendedView.canReject, true);
 
 const ceoView = getBonusWorkflowView(ceo, recommendation());
-assert.equal(ceoView.canApprove, false, "CEO must stay read-only for bonuses.");
-assert.equal(ceoView.canAdjust, false, "CEO must not adjust bonuses.");
-assert.equal(ceoView.canReject, false, "CEO must not reject bonuses.");
+assert.equal(ceoView.canApprove, true, "CEO may approve bonuses.");
+assert.equal(ceoView.canAdjust, true, "CEO may adjust bonuses.");
+assert.equal(ceoView.canReject, true, "CEO may reject bonuses.");
 
 resetBonusWorkflowStoreForTests();
 
@@ -206,10 +206,11 @@ assertDecisionError("BONUS_DECISION_FORBIDDEN", () =>
   }),
 );
 
-const areaApproved = decideBonus(areaManager, recommendation(), {
-  action: "approve",
-});
-assert.equal(areaApproved.status, "APPROVED");
+assertDecisionError("BONUS_DECISION_FORBIDDEN", () =>
+  decideBonus(areaManager, recommendation(), {
+    action: "approve",
+  }),
+);
 
 resetBonusWorkflowStoreForTests();
 

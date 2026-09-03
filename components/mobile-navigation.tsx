@@ -32,6 +32,9 @@ export function MobileNavigation({ roleKey }: MobileNavigationProps) {
   const searchParams = useSearchParams();
   const [open, setOpen] = useState(false);
   const groups = getGroupedNavigationForRole(roleKey);
+  const canOpenRoleHome = ["super_admin", "webmaster_admin", "ceo"].includes(
+    roleKey,
+  );
 
   function hrefForItem(item: NavigationItem) {
     const businessLineId = businessLineByHref[item.href];
@@ -91,7 +94,7 @@ export function MobileNavigation({ roleKey }: MobileNavigationProps) {
 
             <nav className="flex-1 overflow-y-auto px-3 py-4">
               <div className="grid gap-4">
-                <Link
+                {canOpenRoleHome ? <Link
                   className={cn(
                     "flex h-11 items-center gap-3 rounded-lg px-3 text-sm text-white/75 transition-colors hover:bg-white/10 hover:text-white",
                     pathname === "/protected" &&
@@ -102,7 +105,7 @@ export function MobileNavigation({ roleKey }: MobileNavigationProps) {
                 >
                   <Home className="size-4 shrink-0" />
                   Inicio por rol
-                </Link>
+                </Link> : null}
 
                 {groups.map((group) => (
                   <section className="grid gap-1" key={group.key}>

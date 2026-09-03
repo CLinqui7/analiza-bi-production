@@ -2,6 +2,7 @@ import { LaboratoryVerticalDashboard } from "@/components/laboratory-vertical-da
 import { MonthlySubmissionCenter } from "@/components/production/monthly-submission-center";
 import { ImagingVerticalDashboard } from "@/components/imaging-vertical-dashboard";
 import { PhysiotherapyVerticalDashboard } from "@/components/physiotherapy-vertical-dashboard";
+import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard";
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
 import { getBusinessLineForCompany } from "@/lib/tenant/demo-context";
@@ -92,14 +93,14 @@ export async function MonthlyClosureRouter({
 
   if (!isDemoRuntimeEnvironment()) {
     if (mode !== "new-closure") {
-      return (
-        <section className="flex w-full flex-col gap-4 px-4 py-6 lg:px-6">
-          <div className="rounded-md border bg-card p-6">
-            <h1 className="text-xl font-semibold tracking-normal">Consulta de cierres</h1>
-            <p className="mt-2 text-sm leading-6 text-muted-foreground">Este módulo es de consulta. La captura mensual está disponible únicamente para el gerente de sucursal asignado.</p>
-          </div>
-        </section>
-      );
+      const dashboardMode = mode === "branch-home"
+        ? "branch"
+        : mode === "history"
+          ? "history"
+          : mode === "results"
+            ? "results"
+            : "results";
+      return <BranchBiServerDashboard actor={actor} mode={dashboardMode} />;
     }
 
     if (actor.roleKey !== "gerente_sucursal") {

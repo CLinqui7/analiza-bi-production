@@ -34,13 +34,13 @@ const actionRoles: Record<ActionKey, RoleKey[]> = {
   "connectors.manage": ["super_admin", "webmaster_admin"],
   "goals.read": ["super_admin", "webmaster_admin", "ceo", "gerente_operaciones", "gerente_area", "gerente_sucursal", "viewer"],
   "goals.manage": ["super_admin", "webmaster_admin", "ceo", "gerente_operaciones"],
-  "users.read": ["super_admin", "webmaster_admin", "ceo", "gerente_operaciones", "gerente_area"],
-  "users.invite": ["super_admin", "webmaster_admin", "ceo", "gerente_operaciones", "gerente_area"],
+  "users.read": ["super_admin", "webmaster_admin", "gerente_operaciones"],
+  "users.invite": ["super_admin", "webmaster_admin", "gerente_operaciones"],
   "roles.read": ["super_admin", "webmaster_admin", "ceo"],
   "audit.read": ["super_admin", "webmaster_admin"],
   "exports.create": ["super_admin", "webmaster_admin", "ceo", "gerente_operaciones", "gerente_area", "gerente_sucursal", "viewer"],
   "structure.manage": ["super_admin", "webmaster_admin", "gerente_operaciones"],
-  "assignments.manage": ["super_admin", "webmaster_admin", "gerente_operaciones", "gerente_area"],
+  "assignments.manage": ["super_admin", "webmaster_admin", "gerente_operaciones"],
 };
 
 export function isSuperAdministrator(roleKey: RoleKey) {

@@ -947,6 +947,7 @@ export function MonthlySubmissionCenter({
               </button>
             ))}
             <button
+              data-testid="monthly-final-step"
               type="button"
               onClick={() => setCurrentStep(finalStepIndex)}
               className={`whitespace-nowrap rounded-full border px-3 py-1.5 text-xs ${isFinalStep ? "border-primary bg-primary text-primary-foreground" : "bg-background hover:bg-muted"}`}
@@ -1106,7 +1107,7 @@ export function MonthlySubmissionCenter({
 
           <div className="flex flex-wrap gap-2">
             {canWrite && (
-              <Button type="button" onClick={() => void save()} disabled={busy !== null || (!dirty && Boolean(saved))}>
+              <Button data-testid="monthly-save-draft" type="button" onClick={() => void save()} disabled={busy !== null || (!dirty && Boolean(saved))}>
                 {busy === "save" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />} Guardar borrador
               </Button>
             )}

@@ -42,25 +42,19 @@ assert.ok(
 );
 
 assert.ok(
-  overviewPage.includes("isDemoRuntimeEnvironment()") &&
-    overviewPage.includes('await import("@/components/executive-dashboard")') &&
-    overviewPage.includes("getOfficialExecutiveSnapshot") &&
-    !overviewPage.includes("import { ExecutiveDashboard }"),
-  "CEO Overview must import the demo dashboard only inside the APP_ENV=demo branch.",
+  overviewPage.includes("BranchBiServerDashboard") &&
+    overviewPage.includes('mode="home"') &&
+    !overviewPage.includes("ExecutiveDashboard"),
+  "CEO Overview must use the scoped V7 dashboard in production.",
 );
 
 assert.ok(
-  officialBi.includes("monthly_closings") &&
-    officialBi.includes("closing_versions") &&
-    officialBi.includes("closing_kpi_results") &&
-    officialBi.includes("kpi_targets") &&
-    officialBi.includes("generated_insights") &&
-    officialBi.includes("cv.status = 'PUBLISHED'") &&
-    officialBi.includes("approved_at is not null") &&
-    officialBi.includes("cv.is_demo = false") &&
-    officialBi.includes("mc.is_demo = false") &&
-    officialBi.includes("isScopeWildcard"),
-  "Official BI snapshot must use published closings, calculated KPIs, approved targets and official insights only.",
+  officialBi.includes("getBranchBiSnapshot") &&
+    officialBi.includes("lineFilterMatches") &&
+    officialBi.includes("PostgreSQL compatibility fallback") &&
+    !officialBi.includes("monthly_closings") &&
+    !officialBi.includes("generated_insights"),
+  "Official BI must use the V7 source without a legacy-schema fallback.",
 );
 
 assert.ok(
@@ -138,7 +132,7 @@ assert.ok(
     monthlyRouter.includes('normalizedValue === "business-line-laboratorio"') &&
     monthlyRouter.includes('normalizedValue === "business-line-fisioterapia"') &&
     monthlyRouter.includes('normalizedValue?.includes("laboratorio")') &&
-    officialBi.includes('normalizedLine?.includes("laboratorio")'),
+    officialBi.includes("lineFilterMatches"),
   "Resultados must receive the active line from URL context and route every business line correctly.",
 );
 

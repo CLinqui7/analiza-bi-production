@@ -46,6 +46,9 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
   const visibleItems = getNavigationForRole(activeRole);
   const visibleGroups = getGroupedNavigationForRole(activeRole);
   const roleProfile = demoRoleProfiles[activeRole];
+  const canOpenRoleHome = ["super_admin", "webmaster_admin", "ceo"].includes(
+    activeRole,
+  );
 
   useEffect(() => {
     setCollapsed(window.localStorage.getItem(storageKey) === "true");
@@ -123,7 +126,7 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <div className="grid gap-4">
-          <Link
+          {canOpenRoleHome ? <Link
             className={cn(
               "flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-white/70 transition-colors hover:bg-white/10 hover:text-white",
               pathname === "/protected" &&
@@ -137,7 +140,7 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
             <span className={cn(collapsed && "sr-only")}>
               Inicio por rol
             </span>
-          </Link>
+          </Link> : null}
 
           {visibleGroups.map((group) => (
             <section className="grid gap-1" key={group.key}>

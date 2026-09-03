@@ -28,6 +28,11 @@ type CurrentUserAccessResponse = {
   user?: CurrentUserAccess;
 };
 
+// React Strict Mode may mount the header twice in development. Reuse only an
+// active request (never a resolved user) so a session switch cannot reuse
+// another actor's access data.
+let currentUserAccessInFlight: Promise<CurrentUserAccess | null> | null = null;
+
 export function isBranchManagerScopedAccess(
   access: CurrentUserAccess | null,
 ): access is CurrentUserAccess & {
@@ -42,17 +47,25 @@ export function isBranchManagerScopedAccess(
 }
 
 export async function fetchCurrentUserAccess() {
-  const response = await fetch("/api/auth/session", {
-    cache: "no-store",
-  }).catch(() => null);
-
-  if (!response?.ok) {
-    return null;
+  if (!currentUserAccessInFlight) {
+    const request = fetch("/api/auth/session", {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        if (!response.ok) return null;
+        const payload = (await response.json().catch(() => null)) as
+          | CurrentUserAccessResponse
+          | null;
+        return payload?.ok === true && payload.user ? payload.user : null;
+      })
+      .catch(() => null);
+    currentUserAccessInFlight = request;
+    void request.finally(() => {
+      if (currentUserAccessInFlight === request) {
+        currentUserAccessInFlight = null;
+      }
+    });
   }
 
-  const payload = (await response.json().catch(() => null)) as
-    | CurrentUserAccessResponse
-    | null;
-
-  return payload?.ok === true && payload.user ? payload.user : null;
+  return currentUserAccessInFlight;
 }

@@ -428,6 +428,7 @@ assert.deepEqual(
     "/protected/cierres",
     "/protected/resultados",
     "/protected/plantillas",
+    "/protected/metas",
     "/protected/configuracion",
   ],
   "Branch manager navigation must expose the scoped monthly form and avoid administrative ingestion.",

@@ -88,6 +88,13 @@ type BranchManagerRow = {
   ends_on: string | null;
 };
 type ProfileRow = { id: string; display_name: string | null; email: string | null; status: string };
+type ManagerAssignmentRow = {
+  branch_id: string | null;
+  operational_area_id: string | null;
+  profile_id: string;
+  role_id: string;
+};
+type RoleRow = { id: string; key: string };
 
 const globalRoles = new Set(["super_admin", "webmaster_admin", "ceo"]);
 
@@ -182,6 +189,8 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
     areasResult,
     branchesResult,
     branchManagersResult,
+    managerAssignmentsResult,
+    rolesResult,
   ] = await Promise.all([
     supabase.from("countries").select("id,name,iso2").eq("organization_id", organizationId).order("name"),
     supabase.from("companies").select("id,name,key").eq("organization_id", organizationId).order("name"),
@@ -189,6 +198,8 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
     supabase.from("operational_areas").select("id,name,code,company_id,country_id,manager_profile_id").eq("organization_id", organizationId).eq("status", "active").order("name"),
     supabase.from("branches").select("id,name,code,company_id,country_id,operational_area_id,city,status").eq("organization_id", organizationId).in("status", ["active", "pending_manager"]).order("name"),
     supabase.from("branch_managers").select("id,branch_id,profile_id,display_name,email,starts_on,ends_on").eq("organization_id", organizationId).eq("is_demo", false).order("display_name"),
+    supabase.from("manager_assignments").select("profile_id,role_id,operational_area_id,branch_id").eq("organization_id", organizationId).eq("status", "active").is("deactivated_at", null),
+    supabase.from("roles").select("id,key"),
   ]);
 
   const countries = (countriesResult.data ?? []) as CountryRow[];
@@ -197,6 +208,10 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
   const areas = (areasResult.data ?? []) as AreaRow[];
   const branches = (branchesResult.data ?? []) as BranchRow[];
   const branchManagerRows = (branchManagersResult.data ?? []) as BranchManagerRow[];
+  const managerAssignmentRows = (managerAssignmentsResult.data ?? []) as ManagerAssignmentRow[];
+  const roleKeyById = new Map(
+    ((rolesResult.data ?? []) as RoleRow[]).map((role) => [role.id, role.key]),
+  );
 
   const visibleBranches = branches.filter((item) => actorCanSee(actor, {
     organizationId,
@@ -251,7 +266,10 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
       .map((item) => item.profile_id)
       .filter((value): value is string => Boolean(value)),
   ));
-  const profileIds = Array.from(new Set([...areaManagerIds, ...branchManagerProfileIds, actor.userId]));
+  const assignmentProfileIds = managerAssignmentRows
+    .filter((assignment) => ["gerente_area", "gerente_sucursal"].includes(roleKeyById.get(assignment.role_id) ?? ""))
+    .map((assignment) => assignment.profile_id);
+  const profileIds = Array.from(new Set([...areaManagerIds, ...branchManagerProfileIds, ...assignmentProfileIds, actor.userId]));
   const profilesResult = profileIds.length > 0
     ? await supabase.from("profiles").select("id,display_name,email,status").in("id", profileIds)
     : { data: [] };
@@ -259,7 +277,8 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
   const profileById = new Map(profiles.map((item) => [item.id, item]));
 
   const today = new Date().toISOString().slice(0, 10);
-  const branchManagers: ManagerOption[] = branchManagerRows
+  const branchManagers: ManagerOption[] = [
+    ...branchManagerRows
     .filter((item) => visibleBranchIds.has(item.branch_id))
     .filter((item) => !item.ends_on || item.ends_on >= today)
     .map((item) => {
@@ -270,9 +289,23 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
         email: profile?.email ?? item.email,
         branchId: item.branch_id,
       };
-    });
+    }),
+    ...managerAssignmentRows
+      .filter((assignment) => roleKeyById.get(assignment.role_id) === "gerente_sucursal")
+      .filter((assignment) => assignment.branch_id && visibleBranchIds.has(assignment.branch_id))
+      .map((assignment) => {
+        const profile = profileById.get(assignment.profile_id);
+        return {
+          id: assignment.profile_id,
+          name: profile?.display_name?.trim() || profile?.email || "Gerente de sucursal asignado",
+          email: profile?.email ?? null,
+          branchId: assignment.branch_id ?? undefined,
+        };
+      }),
+  ];
 
-  const areaManagers: ManagerOption[] = visibleAreas
+  const areaManagers: ManagerOption[] = [
+    ...visibleAreas
     .filter((item) => item.manager_profile_id)
     .map((item) => {
       const profile = profileById.get(item.manager_profile_id!);
@@ -282,7 +315,20 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
         email: profile?.email ?? null,
         operationalAreaId: item.id,
       };
-    });
+    }),
+    ...managerAssignmentRows
+      .filter((assignment) => roleKeyById.get(assignment.role_id) === "gerente_area")
+      .filter((assignment) => assignment.operational_area_id && visibleBranchAreaIds.has(assignment.operational_area_id))
+      .map((assignment) => {
+        const profile = profileById.get(assignment.profile_id);
+        return {
+          id: assignment.profile_id,
+          name: profile?.display_name?.trim() || profile?.email || "Gerente de área asignado",
+          email: profile?.email ?? null,
+          operationalAreaId: assignment.operational_area_id ?? undefined,
+        };
+      }),
+  ];
 
   const countryById = new Map(countries.map((item) => [item.id, item]));
   const companyById = new Map(companies.map((item) => [item.id, item]));

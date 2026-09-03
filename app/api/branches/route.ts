@@ -1,15 +1,10 @@
 import { NextResponse } from "next/server";
 
-import { demoOrganizationId } from "@/lib/auth/demo-admin";
-import {
-  BranchGovernanceError,
-  createGovernedBranch,
-} from "@/lib/server/branch-governance";
 import { getCurrentAuthorizationActor } from "@/lib/server/authorization";
-import { getMissingDatabaseConfig } from "@/lib/server/database";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
-import { canPerformAction } from "@/lib/security/authorization-policy";
-import type { ScopeBoundary } from "@/lib/tenant/delegation-policy";
+import { canAccessRecord } from "@/lib/v7/security/authorization-policy";
+import { resolveV7ActorFromCurrent } from "@/lib/v7/server/api-auth";
+import type { ScopeBoundary } from "@/lib/v7/security/types";
 
 type CreateBranchRequest = {
   city?: unknown;
@@ -20,280 +15,198 @@ type CreateBranchRequest = {
 };
 
 type BranchReadRow = {
-  id: string;
   company_id: string | null;
   country_id: string | null;
+  id: string;
   operational_area_id: string | null;
   organization_id: string;
 };
 
 const branchCodePattern = /^[A-Z0-9][A-Z0-9-_]{1,30}$/;
-const uuidPattern =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function readScope(value: unknown): ScopeBoundary | null {
-  if (typeof value !== "object" || value === null) {
-    return null;
-  }
-
+  if (typeof value !== "object" || value === null) return null;
   const scope = value as Record<string, unknown>;
-  const organizationId =
-    scope.organizationId === "Grupo Analiza DEMO"
-      ? demoOrganizationId
-      : scope.organizationId;
 
-  if (typeof organizationId !== "string" || !organizationId) {
+  if (typeof scope.organizationId !== "string" || !scope.organizationId) {
     return null;
   }
 
   return {
-    branchId: null,
-    companyId:
-      typeof scope.companyId === "string" ? scope.companyId : undefined,
-    countryId:
-      typeof scope.countryId === "string" ? scope.countryId : undefined,
+    companyId: typeof scope.companyId === "string" ? scope.companyId : null,
+    countryId: typeof scope.countryId === "string" ? scope.countryId : null,
     operationalAreaId:
       typeof scope.operationalAreaId === "string"
         ? scope.operationalAreaId
-        : undefined,
-    organizationId,
+        : null,
+    organizationId: scope.organizationId,
   };
+}
+
+function jsonError(error: string, status: number) {
+  return NextResponse.json({ error, ok: false }, { status });
 }
 
 function normalizeCode(value: string) {
   return value.trim().toUpperCase().replace(/\s+/g, "-");
 }
 
-function jsonError(error: string, status: number, missingConfig: string[] = []) {
-  return NextResponse.json({ error, missingConfig, ok: false }, { status });
+function canCreateBranch(roleKey: string) {
+  return ["super_admin", "webmaster_admin", "gerente_operaciones"].includes(
+    roleKey,
+  );
 }
 
 export async function GET() {
   const actor = await getCurrentAuthorizationActor();
-
-  if (!actor) {
-    return jsonError("Debes iniciar sesion para ver sucursales.", 401);
-  }
+  if (!actor) return jsonError("Debes iniciar sesión para ver sucursales.", 401);
 
   const admin = getSupabaseAdminClient();
-  if (!admin) {
-    return jsonError("Supabase de servidor no esta configurado.", 503, ["SUPABASE_SERVICE_ROLE_KEY"]);
-  }
+  if (!admin) return jsonError("Supabase de servidor no está configurado.", 503);
 
+  const v7Actor = await resolveV7ActorFromCurrent(actor);
   const { data, error } = await admin
     .from("branches")
-    .select("id,organization_id,country_id,company_id,operational_area_id,code,name,city,status,is_enabled,is_demo")
+    .select(
+      "id,organization_id,country_id,company_id,operational_area_id,code,name,city,status,is_enabled,is_demo",
+    )
     .eq("organization_id", actor.scope.organizationId)
     .eq("is_demo", false)
     .eq("is_enabled", true)
     .is("deleted_at", null)
     .order("name");
 
-  if (error) {
-    return jsonError("No se pudieron leer las sucursales autorizadas.", 500);
-  }
+  if (error) return jsonError("No se pudieron leer las sucursales autorizadas.", 500);
 
-  const items = ((data ?? []) as Array<BranchReadRow & Record<string, unknown>>).filter((branch) =>
-    canPerformAction(actor, "record.read", {
-      scope: {
-        organizationId: branch.organization_id,
-        countryId: branch.country_id,
-        companyId: branch.company_id,
-        operationalAreaId: branch.operational_area_id,
+  const items = ((data ?? []) as Array<BranchReadRow & Record<string, unknown>>)
+    .filter((branch) =>
+      canAccessRecord(v7Actor, {
         branchId: branch.id,
-      },
-    }),
-  );
+        companyId: branch.company_id,
+        countryId: branch.country_id,
+        operationalAreaId: branch.operational_area_id,
+        organizationId: branch.organization_id,
+      }),
+    );
 
-  return NextResponse.json({ items, ok: true, source: "supabase" });
+  return NextResponse.json({ items, ok: true, source: "supabase-v7" });
 }
 
 export async function POST(request: Request) {
   const actor = await getCurrentAuthorizationActor();
-
-  if (!actor) {
-    return jsonError("Debes iniciar sesion para crear sucursales.", 401);
+  if (!actor) return jsonError("Debes iniciar sesión para crear sucursales.", 401);
+  if (!canCreateBranch(actor.roleKey)) {
+    return jsonError("Tu rol no puede crear sucursales.", 403);
   }
 
-  const missingConfig = getMissingDatabaseConfig();
-
-  const payload = (await request.json().catch(() => null)) as
-    | CreateBranchRequest
-    | null;
-  const name =
-    typeof payload?.name === "string" ? payload.name.trim() : "";
-  const code =
-    typeof payload?.code === "string" ? normalizeCode(payload.code) : "";
-  const city =
-    typeof payload?.city === "string" ? payload.city.trim() : "";
-  const reason =
-    typeof payload?.reason === "string" ? payload.reason.trim() : "";
+  const payload = (await request.json().catch(() => null)) as CreateBranchRequest | null;
+  const name = typeof payload?.name === "string" ? payload.name.trim() : "";
+  const code = typeof payload?.code === "string" ? normalizeCode(payload.code) : "";
+  const city = typeof payload?.city === "string" ? payload.city.trim() : "";
+  const reason = typeof payload?.reason === "string" ? payload.reason.trim() : "";
   const targetScope = readScope(payload?.scope);
 
-  if (name.length < 3) {
-    return jsonError("Escribe el nombre completo de la sucursal.", 400);
-  }
-
+  if (name.length < 3) return jsonError("Escribe el nombre completo de la sucursal.", 400);
   if (!branchCodePattern.test(code)) {
-    return jsonError(
-      "El codigo debe tener 2 a 31 caracteres, usando letras, numeros, guion o guion bajo.",
-      400,
-    );
+    return jsonError("El código de sucursal no tiene un formato válido.", 400);
   }
-
-  if (!targetScope || !targetScope.countryId || !targetScope.companyId) {
-    return jsonError(
-      "Selecciona pais y linea de negocio para crear la sucursal.",
-      400,
-    );
+  if (!targetScope?.countryId || !targetScope.companyId) {
+    return jsonError("Selecciona país y línea de negocio para crear la sucursal.", 400);
   }
-
   if (reason.length < 10) {
-    return jsonError("Agrega una razon de alta para el historial.", 400);
+    return jsonError("Agrega una razón de alta para el historial.", 400);
+  }
+  if (targetScope.organizationId !== actor.scope.organizationId) {
+    return jsonError("La organización seleccionada no coincide con tu sesión.", 403);
   }
 
-  if (!canPerformAction(actor, "branches.create", { scope: targetScope })) {
-    return jsonError(
-      "Tu rol no puede crear sucursales fuera de su alcance autorizado.",
-      403,
-    );
+  const v7Actor = await resolveV7ActorFromCurrent(actor);
+  if (!canAccessRecord(v7Actor, targetScope)) {
+    return jsonError("La sucursal debe permanecer dentro de tu alcance autorizado.", 403);
   }
 
-  if (missingConfig.length > 0) {
-    const admin = getSupabaseAdminClient();
-    if (!admin) {
-      return jsonError(
-        "Supabase de servidor no esta configurado para crear sucursales reales.",
-        503,
-        ["SUPABASE_SERVICE_ROLE_KEY"],
-      );
+  const admin = getSupabaseAdminClient();
+  if (!admin) return jsonError("Supabase de servidor no está configurado.", 503);
+
+  if (targetScope.operationalAreaId) {
+    const { data: area, error: areaError } = await admin
+      .from("operational_areas")
+      .select("id")
+      .eq("id", targetScope.operationalAreaId)
+      .eq("organization_id", targetScope.organizationId)
+      .eq("country_id", targetScope.countryId)
+      .eq("company_id", targetScope.companyId)
+      .eq("status", "active")
+      .maybeSingle();
+    if (areaError || !area) {
+      return jsonError("El área operativa no pertenece al alcance seleccionado.", 400);
     }
-
-    if (targetScope.operationalAreaId) {
-      const { data: area, error: areaError } = await admin
-        .from("operational_areas")
-        .select("id")
-        .eq("id", targetScope.operationalAreaId)
-        .eq("organization_id", targetScope.organizationId)
-        .eq("country_id", targetScope.countryId)
-        .eq("company_id", targetScope.companyId)
-        .eq("status", "active")
-        .maybeSingle();
-
-      if (areaError || !area) {
-        return jsonError(
-          "La gerencia de area no pertenece al pais y linea seleccionados.",
-          400,
-        );
-      }
-    }
-
-    const normalizedCode = normalizeCode(code);
-    const { data: branchData, error: branchError } = await admin
-      .from("branches")
-      .insert({
-        organization_id: targetScope.organizationId,
-        country_id: targetScope.countryId,
-        company_id: targetScope.companyId,
-        operational_area_id: targetScope.operationalAreaId ?? null,
-        code: normalizedCode,
-        name,
-        city: city || null,
-        status: "pending_manager",
-        is_demo: false,
-        created_by: uuidPattern.test(actor.userId) ? actor.userId : null,
-      })
-      .select("id,code,name,status")
-      .single();
-
-    if (branchError || !branchData) {
-      const duplicate = branchError?.code === "23505";
-      return jsonError(
-        duplicate
-          ? "Ya existe una sucursal con ese codigo en el pais y linea seleccionados."
-          : `No se pudo crear la sucursal: ${branchError?.message ?? "error desconocido"}`,
-        duplicate ? 409 : 500,
-      );
-    }
-
-    const branch = branchData as {
-      id: string;
-      code: string;
-      name: string;
-      status: string;
-    };
-
-    if (targetScope.operationalAreaId) {
-      await admin.from("area_branch_assignments").insert({
-        organization_id: targetScope.organizationId,
-        operational_area_id: targetScope.operationalAreaId,
-        branch_id: branch.id,
-        assigned_by: uuidPattern.test(actor.userId) ? actor.userId : null,
-      });
-    }
-
-    await Promise.all([
-      admin.from("assignment_history").insert({
-        organization_id: targetScope.organizationId,
-        actor_user_id: uuidPattern.test(actor.userId) ? actor.userId : null,
-        entity_table: "branches",
-        entity_id: branch.id,
-        action: "branch.created",
-        previous_scope: {},
-        next_scope: {
-          branch_id: branch.id,
-          code: branch.code,
-          company_id: targetScope.companyId,
-          country_id: targetScope.countryId,
-          name: branch.name,
-          operational_area_id: targetScope.operationalAreaId ?? null,
-          status: branch.status,
-        },
-        reason,
-      }),
-      admin.from("audit_logs").insert({
-        organization_id: targetScope.organizationId,
-        actor_user_id: uuidPattern.test(actor.userId) ? actor.userId : null,
-        action: "branch.created",
-        entity_table: "branches",
-        entity_id: branch.id,
-        country_id: targetScope.countryId,
-        company_id: targetScope.companyId,
-        branch_id: branch.id,
-        metadata: {
-          created_status: branch.status,
-          has_operational_area: Boolean(targetScope.operationalAreaId),
-          source: "usuarios-permisos-supabase",
-        },
-      }),
-    ]);
-
-    return NextResponse.json({ branch, ok: true, source: "supabase", status: "created" });
   }
 
-  try {
-    const branch = await createGovernedBranch({
-      actor,
-      city,
+  const { data: branch, error: branchError } = await admin
+    .from("branches")
+    .insert({
+      city: city || null,
       code,
+      company_id: targetScope.companyId,
+      country_id: targetScope.countryId,
+      created_by: actor.userId,
+      is_demo: false,
       name,
-      reason,
-      scope: targetScope,
-    });
+      operational_area_id: targetScope.operationalAreaId,
+      organization_id: targetScope.organizationId,
+      status: "pending_manager",
+    })
+    .select("id,code,name,status")
+    .single();
 
-    return NextResponse.json({ branch, ok: true, status: "created" });
-  } catch (error) {
-    if (error instanceof BranchGovernanceError) {
-      return jsonError(error.message, 400);
-    }
-
-    console.error("Failed to create governed branch", {
-      message: error instanceof Error ? error.message : "Unknown error",
-    });
-
+  if (branchError || !branch) {
     return jsonError(
-      "No se pudo crear la sucursal. Revisa base de datos y logs del servidor.",
-      502,
+      branchError?.code === "23505"
+        ? "Ya existe una sucursal con ese código en el alcance seleccionado."
+        : "No se pudo crear la sucursal.",
+      branchError?.code === "23505" ? 409 : 500,
     );
   }
+
+  if (targetScope.operationalAreaId) {
+    await admin.from("area_branch_assignments").insert({
+      assigned_by: actor.userId,
+      branch_id: branch.id,
+      operational_area_id: targetScope.operationalAreaId,
+      organization_id: targetScope.organizationId,
+    });
+  }
+
+  await Promise.all([
+    admin.from("assignment_history").insert({
+      action: "branch.created",
+      actor_user_id: actor.userId,
+      entity_id: branch.id,
+      entity_table: "branches",
+      next_scope: {
+        branch_id: branch.id,
+        code: branch.code,
+        company_id: targetScope.companyId,
+        country_id: targetScope.countryId,
+        operational_area_id: targetScope.operationalAreaId,
+      },
+      organization_id: targetScope.organizationId,
+      previous_scope: {},
+      reason,
+    }),
+    admin.from("audit_logs").insert({
+      action: "branch.created",
+      actor_user_id: actor.userId,
+      branch_id: branch.id,
+      company_id: targetScope.companyId,
+      country_id: targetScope.countryId,
+      entity_id: branch.id,
+      entity_table: "branches",
+      metadata: { source: "branches-v7" },
+      organization_id: targetScope.organizationId,
+    }),
+  ]);
+
+  return NextResponse.json({ branch, ok: true, source: "supabase-v7", status: "created" });
 }
