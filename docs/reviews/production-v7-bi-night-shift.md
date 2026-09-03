@@ -35,6 +35,12 @@ solicitudes iniciales de sesión o contexto. El resultado se guarda localmente
 en `artifacts/selenium/authenticated-roles/result.json`, carpeta ignorada por
 Git y sin datos organizacionales privados.
 
+La última ejecución contra el build cloud de la rama, con cuatro cuentas QA
+efímeras y limpieza verificada, registró 1,228 ms para cargar el dashboard GA
+y 45 ms para aplicar el filtro localmente. Ambos resultados cubren datos V7
+reales de prueba y no una respuesta simulada; el clic de filtro falla la prueba
+si supera 300 ms o si sesion/contexto se solicitan más de una vez.
+
 ## Riesgo operativo residual
 
 La organización productiva no tenía cierres V7 publicados durante la
