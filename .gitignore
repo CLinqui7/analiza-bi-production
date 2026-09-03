@@ -24,6 +24,8 @@ credentials.*
 *secret*
 !lib/server/passwords.ts
 !scripts/secret-scan.mjs
+!components/forgot-password-form.tsx
+!app/auth/forgot-password/
 
 # Deployment, test, and diagnostic logs
 *.log
