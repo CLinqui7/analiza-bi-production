@@ -219,9 +219,23 @@ export async function POST(request: Request) {
   }
 
   const validation = validateMonthlyResponses(contract.normalized);
-  if (validation.blockers.length > 0) {
-    return NextResponse.json({ error: "VALIDATION_BLOCKED", validation }, { status: 422 });
-  }
+  const publicationContract = validateMonthlyFormContract({
+    line: formLine,
+    responses: responseWithServerContext,
+    requireComplete: true,
+  });
+  const draftValidation = {
+    ...validation,
+    blockers: [
+      ...validation.blockers,
+      ...publicationContract.missing.map((fieldId) => `REQUIRED_FIELD_MISSING:${fieldId}`),
+      "EVIDENCE_REQUIRED",
+    ],
+  };
+  // A draft is an auditable work-in-progress.  Semantic blockers (missing
+  // required answers, evidence and approval) are recorded on the version and
+  // enforced only by the publication endpoint.  Invalid payloads and invalid
+  // field formats have already been rejected above.
 
   const { data: existingSubmission, error: submissionError } = await supabase
     .from("manual_monthly_submissions")
@@ -269,8 +283,8 @@ export async function POST(request: Request) {
       version_number: nextVersion,
       responses: validation.normalized,
       validation_summary: {
-        blockers: validation.blockers,
-        warnings: validation.warnings,
+        blockers: draftValidation.blockers,
+        warnings: draftValidation.warnings,
         form_contract_invalid: contract.invalid,
       },
       quality_score: null,
@@ -291,7 +305,7 @@ export async function POST(request: Request) {
     submission_version_id: version.id,
     event_type: nextVersion === 1 ? "created" : "saved",
     actor_id: actor.userId,
-    details: { warnings: validation.warnings, form_line: formLine },
+    details: { warnings: draftValidation.warnings, blockers: draftValidation.blockers, form_line: formLine },
   });
   await supabase.from("audit_logs").insert({
     organization_id: actor.scope.organizationId,
@@ -308,7 +322,7 @@ export async function POST(request: Request) {
   return NextResponse.json({
     submissionId: submission.id,
     version,
-    validation,
+    validation: draftValidation,
     formLine,
   }, { status: 201 });
 }

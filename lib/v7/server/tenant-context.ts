@@ -111,11 +111,14 @@ function matchesGrant(grant: ScopeBoundary, target: ScopeBoundary) {
     && (!grant.companyId || grant.companyId === target.companyId)
     && (!grant.operationalAreaId || grant.operationalAreaId === target.operationalAreaId)
     && (!grant.branchId || grant.branchId === target.branchId)
-    && (!grant.businessLineId || grant.businessLineId === target.businessLineId)
+    // A branch catalogue row has no business-line dimension. It can identify
+    // an assigned branch, but it must not reject that branch merely because
+    // the grant is line-specific; downstream records retain line checks.
+    && (!grant.businessLineId || !target.businessLineId || grant.businessLineId === target.businessLineId)
   );
 }
 
-function actorCanSee(actor: Actor, target: ScopeBoundary) {
+export function actorCanSee(actor: Actor, target: ScopeBoundary) {
   if (globalRoles.has(actor.roleKey)) return true;
   return grantsFor(actor).some((grant) => matchesGrant(grant, target));
 }
@@ -239,12 +242,10 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
   const visibleCompanyIds = new Set<string>([
     ...visibleBranches.map((item) => item.company_id),
     ...visibleAreas.map((item) => item.company_id),
-    ...grantsFor(actor).map((grant) => grant.companyId).filter((value): value is string => Boolean(value)),
   ]);
   const visibleCountryIds = new Set<string>([
     ...visibleBranches.map((item) => item.country_id),
     ...visibleAreas.map((item) => item.country_id),
-    ...grantsFor(actor).map((grant) => grant.countryId).filter((value): value is string => Boolean(value)),
   ]);
 
   const isGlobal = globalRoles.has(actor.roleKey);

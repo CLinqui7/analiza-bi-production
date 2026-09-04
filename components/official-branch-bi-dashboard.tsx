@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowUpDown,
@@ -12,7 +12,6 @@ import {
   UsersRound,
 } from "lucide-react";
 
-import { uniqueSelectableValues } from "@/lib/analytics/filter-visibility";
 import type {
   BranchBiMetric,
   BranchBiRecord,
@@ -31,6 +30,21 @@ type FilterState = {
   line: string;
   manager: string;
 };
+type FilterOption = { id: string; name: string };
+
+function recordOptions(
+  records: readonly BranchBiRecord[],
+  select: (record: BranchBiRecord) => { id: string | null; name: string | null },
+) {
+  return Array.from(
+    new Map(
+      records.flatMap((record) => {
+        const option = select(record);
+        return option.id && option.name ? [[option.id, { id: option.id, name: option.name }] as const] : [];
+      }),
+    ).values(),
+  );
+}
 
 function metricValue(metric: BranchBiMetric | undefined) {
   return metric?.value ?? null;
@@ -100,7 +114,7 @@ function FilterSelect({
 }: {
   label: string;
   onChange: (value: string) => void;
-  options: readonly string[];
+  options: readonly FilterOption[];
   value: string;
 }) {
   if (options.length < 2) return null;
@@ -116,7 +130,7 @@ function FilterSelect({
       >
         <option value="">Todas</option>
         {options.map((option) => (
-          <option key={option} value={option}>{option}</option>
+          <option key={option.id} value={option.id}>{option.name}</option>
         ))}
       </select>
     </label>
@@ -240,28 +254,29 @@ export function OfficialBranchBiDashboard({
   const router = useRouter();
   const searchParams = useSearchParams();
   const [draftFilters, setDraftFilters] = useState<FilterState>(() => ({
-    area: searchParams.get("bi_area") ?? "",
-    branch: searchParams.get("bi_branch") ?? "",
-    country: searchParams.get("bi_country") ?? "",
-    line: searchParams.get("bi_line") ?? "",
-    manager: searchParams.get("bi_manager") ?? "",
+    area: searchParams.get("area") ?? searchParams.get("bi_area") ?? "",
+    branch: searchParams.get("branch") ?? searchParams.get("bi_branch") ?? "",
+    country: searchParams.get("country") ?? searchParams.get("bi_country") ?? "",
+    line: searchParams.get("line") ?? searchParams.get("bi_line") ?? "",
+    manager: searchParams.get("manager") ?? searchParams.get("bi_manager") ?? "",
   }));
   const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => ({
-    area: searchParams.get("bi_area") ?? "",
-    branch: searchParams.get("bi_branch") ?? "",
-    country: searchParams.get("bi_country") ?? "",
-    line: searchParams.get("bi_line") ?? "",
-    manager: searchParams.get("bi_manager") ?? "",
+    area: searchParams.get("area") ?? searchParams.get("bi_area") ?? "",
+    branch: searchParams.get("branch") ?? searchParams.get("bi_branch") ?? "",
+    country: searchParams.get("country") ?? searchParams.get("bi_country") ?? "",
+    line: searchParams.get("line") ?? searchParams.get("bi_line") ?? "",
+    manager: searchParams.get("manager") ?? searchParams.get("bi_manager") ?? "",
   }));
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [sort, setSort] = useState<{ direction: "asc" | "desc"; key: SortKey }>({ direction: "desc", key: "score" });
   const recordsForRole = snapshot.records;
-  const countries = uniqueSelectableValues(recordsForRole, (record) => record.countryName);
-  const lines = uniqueSelectableValues(recordsForRole, (record) => record.businessLineName);
-  const areas = uniqueSelectableValues(recordsForRole, (record) => record.operationalAreaName);
-  const branches = uniqueSelectableValues(recordsForRole, (record) => record.branchName);
-  const managers = uniqueSelectableValues(recordsForRole, (record) => record.branchManagerName);
+  const countries = recordOptions(recordsForRole, (record) => ({ id: record.countryId, name: record.countryName }));
+  const lines = recordOptions(recordsForRole, (record) => ({ id: record.businessLineId, name: record.businessLineName }));
+  const areas = recordOptions(recordsForRole, (record) => ({ id: record.operationalAreaId, name: record.operationalAreaName }));
+  const branches = recordOptions(recordsForRole, (record) => ({ id: record.branchId, name: record.branchName }));
+  const managers = recordOptions(recordsForRole, (record) => ({ id: record.branchManagerName, name: record.branchManagerName }));
   const isBranchManager = roleKey === "gerente_sucursal";
+  const isCountryLocked = roleKey === "gerente_area" || roleKey === "gerente_operaciones";
   const assignments = Array.from(
     new Map(
       recordsForRole.map((record) => [
@@ -277,16 +292,43 @@ export function OfficialBranchBiDashboard({
   );
   const hasSelectableFilters = isBranchManager
     ? assignments.length >= 2
-    : [countries, lines, areas, branches, managers].some(
+    : [
+      ...(isCountryLocked ? [] : [countries]),
+      lines,
+      areas,
+      branches,
+      managers,
+    ].some(
         (options) => options.length >= 2,
       );
+  useEffect(() => {
+    const fromRoute: FilterState = {
+      area: searchParams.get("area") ?? searchParams.get("bi_area") ?? "",
+      branch: searchParams.get("branch") ?? searchParams.get("bi_branch") ?? "",
+      country: searchParams.get("country") ?? searchParams.get("bi_country") ?? "",
+      line: searchParams.get("line") ?? searchParams.get("bi_line") ?? "",
+      manager: searchParams.get("manager") ?? searchParams.get("bi_manager") ?? "",
+    };
+    setDraftFilters(fromRoute);
+    setAppliedFilters(fromRoute);
+    setSelectedBranchId(null);
+  }, [searchParams]);
   const filtered = useMemo(() => recordsForRole.filter((record) => (
-    (!appliedFilters.country || record.countryName === appliedFilters.country)
-    && (!appliedFilters.line || record.businessLineName === appliedFilters.line)
-    && (!appliedFilters.area || record.operationalAreaName === appliedFilters.area)
-    && (!appliedFilters.branch || record.branchName === appliedFilters.branch)
+    (!appliedFilters.country || record.countryId === appliedFilters.country)
+    && (!appliedFilters.line || record.businessLineId === appliedFilters.line)
+    && (!appliedFilters.area || record.operationalAreaId === appliedFilters.area)
+    && (!appliedFilters.branch || record.branchId === appliedFilters.branch)
     && (!appliedFilters.manager || record.branchManagerName === appliedFilters.manager)
   )), [appliedFilters, recordsForRole]);
+  const history = useMemo(() => snapshot.history.filter((entry) => {
+    const record = recordsForRole.find((candidate) => candidate.branchId === entry.branchId);
+    return Boolean(record)
+      && (!appliedFilters.country || record?.countryId === appliedFilters.country)
+      && (!appliedFilters.area || record?.operationalAreaId === appliedFilters.area)
+      && (!appliedFilters.branch || entry.branchId === appliedFilters.branch)
+      && (!appliedFilters.line || entry.businessLineId === appliedFilters.line)
+      && (!appliedFilters.manager || record?.branchManagerName === appliedFilters.manager);
+  }), [appliedFilters, recordsForRole, snapshot.history]);
   const ranking = useMemo(() => [...filtered].sort((left, right) => {
     const valueFor = (record: BranchBiRecord) => {
       if (sort.key === "branch") return record.branchName;
@@ -313,7 +355,7 @@ export function OfficialBranchBiDashboard({
   function applyFilters() {
     const params = new URLSearchParams(searchParams.toString());
     const entries: Array<[keyof FilterState, string]> = [
-      ["country", "bi_country"], ["line", "bi_line"], ["area", "bi_area"], ["branch", "bi_branch"], ["manager", "bi_manager"],
+      ["country", "country"], ["line", "line"], ["area", "area"], ["branch", "branch"], ["manager", "manager"],
     ];
     for (const [key, parameter] of entries) {
       if (draftFilters[key]) params.set(parameter, draftFilters[key]);
@@ -360,7 +402,7 @@ export function OfficialBranchBiDashboard({
             />
           ) : (
             <>
-              <FilterSelect label="País" onChange={(value) => updateDraft("country", value)} options={countries} value={draftFilters.country} />
+              {!isCountryLocked && <FilterSelect label="País" onChange={(value) => updateDraft("country", value)} options={countries} value={draftFilters.country} />}
               <FilterSelect label="Línea" onChange={(value) => updateDraft("line", value)} options={lines} value={draftFilters.line} />
               <FilterSelect label="Área" onChange={(value) => updateDraft("area", value)} options={areas} value={draftFilters.area} />
               <FilterSelect label="Sucursal" onChange={(value) => updateDraft("branch", value)} options={branches} value={draftFilters.branch} />
@@ -370,6 +412,32 @@ export function OfficialBranchBiDashboard({
           {hasSelectableFilters ? <button className="mt-auto h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60" data-testid="bi-apply-filters" disabled={!hasChanges} onClick={applyFilters} type="button">Aplicar filtros</button> : null}
         </div>
       </section>
+
+      {mode === "history" ? (
+        <section className="grid gap-4" data-testid="bi-history">
+          <article className="rounded-lg border bg-card p-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-lg font-semibold">Versiones y evidencia de cierres</h2>
+                <p className="mt-1 text-sm text-muted-foreground">Consulta por período y sucursal; esta pantalla no usa ranking como contenido principal.</p>
+              </div>
+              <Badge variant="outline">{history.length} versiones dentro del alcance</Badge>
+            </div>
+          </article>
+          {snapshot.historyStatus === "source_error" ? <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-900">Error de fuente al consultar el historial. No se sustituye por “Sin dato”.</div> : null}
+          {snapshot.historyStatus === "scope_empty" ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">No hay sucursales autorizadas en el alcance actual.</div> : null}
+          {snapshot.historyStatus === "no_data" ? <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm text-slate-700">No hay versiones de cierre para los filtros aplicados.</div> : null}
+          {history.map((entry) => {
+            const blockers = Array.isArray(entry.validationSummary.blockers) ? entry.validationSummary.blockers.filter((item): item is string => typeof item === "string") : [];
+            return <article className="rounded-lg border bg-card p-4" data-testid="bi-history-entry" key={entry.versionId}>
+              <div className="flex flex-wrap items-start justify-between gap-3"><div><h3 className="font-semibold">{entry.branchName} · {entry.businessLineName}</h3><p className="mt-1 text-sm text-muted-foreground">Período {entry.periodStart.slice(0, 7)} · versión {entry.versionNumber} · autor {entry.authorName ?? "Sin autor registrado"}</p></div><Badge variant="outline">{entry.status}</Badge></div>
+              <div className="mt-3 grid gap-2 text-sm text-muted-foreground sm:grid-cols-3"><span>Fecha: {new Intl.DateTimeFormat("es-SV", { dateStyle: "medium", timeStyle: "short" }).format(new Date(entry.createdAt))}</span><span>Publicación: {entry.publishedAt ? new Intl.DateTimeFormat("es-SV", { dateStyle: "medium" }).format(new Date(entry.publishedAt)) : "Pendiente"}</span><span>Archivos: {entry.attachmentCount}</span></div>
+              <p className="mt-3 text-xs text-muted-foreground">Validación: {blockers.length > 0 ? `pendiente · ${blockers.join(" · ")}` : "sin blockers registrados"}</p>
+              <a className="mt-3 inline-flex text-sm font-medium text-primary underline-offset-4 hover:underline" href={`/api/monthly-submissions/${entry.submissionId}/report?format=pdf`}>Ver detalle / reporte</a>
+            </article>;
+          })}
+        </section>
+      ) : <>
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
@@ -384,8 +452,8 @@ export function OfficialBranchBiDashboard({
         ].map(([label, value, note]) => <article className="rounded-lg border bg-card p-4" key={label}><div className="text-sm text-muted-foreground">{label}</div><div className="mt-2 text-2xl font-semibold tracking-normal">{value}</div><p className="mt-2 text-xs leading-5 text-muted-foreground">{note}</p></article>)}
       </section>
 
-      <section className="rounded-lg border bg-card p-4">
-        <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><BarChart3 className="size-4 text-primary" />Ranking integral de sucursales</div>
+      <section className="rounded-lg border bg-card p-4" data-testid={mode === "results" ? "bi-results-by-branch" : "bi-branches-ranking"}>
+        <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><BarChart3 className="size-4 text-primary" />{mode === "results" ? "Desglose de resultados por sucursal" : "Ranking integral de sucursales"}</div>
         <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr>{([ ["branch", "Sucursal"], ["score", "Puntaje"], ["revenue", "Facturación"], ["quality", "Calidad"] ] as Array<[SortKey, string]>).map(([key, label]) => <th className="py-2 pr-4" key={key}><button aria-label={`Ordenar por ${label}`} className="inline-flex items-center gap-1 font-medium hover:text-foreground" data-sort-direction={sort.key === key ? sort.direction : "none"} onClick={() => toggleSort(key)} type="button">{label}<ArrowUpDown className="size-3" /></button></th>)}<th className="py-2 pr-4 font-medium">Margen</th><th className="py-2 pr-4 font-medium">Estado</th><th className="py-2 font-medium">Gerente</th></tr></thead><tbody>{ranking.map((record) => { const state = status(record); return <tr className={cn("cursor-pointer border-b last:border-b-0 hover:bg-muted/40", selected?.branchId === record.branchId && "bg-primary/5")} key={record.branchId} onClick={() => setSelectedBranchId(record.branchId)}><td className="py-3 pr-4 font-medium">{record.branchName}<div className="text-xs font-normal text-muted-foreground">{record.operationalAreaName ?? "Sin área asignada"}</div></td><td className="py-3 pr-4">{formatMetric(record.metrics.score)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatNumber(record.dataQuality, "%")}</td><td className="py-3 pr-4">{formatMetric(record.metrics.margin)}</td><td className="py-3 pr-4"><Badge className={state.className}>{state.label}</Badge></td><td className="py-3">{record.branchManagerName ?? "Sin gerente asignado"}</td></tr>; })}</tbody></table></div>
         {ranking.length === 0 ? <p className="py-6 text-sm text-muted-foreground">No hay sucursales que coincidan con los filtros aplicados.</p> : null}
       </section>
@@ -400,6 +468,7 @@ export function OfficialBranchBiDashboard({
       <section className="rounded-lg border bg-card p-4"><div className="mb-4 text-sm font-semibold">Heatmap de KPIs publicados</div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr><th className="py-2 pr-4 font-medium">Sucursal</th><th className="py-2 pr-4 font-medium">Facturación</th><th className="py-2 pr-4 font-medium">Volumen</th><th className="py-2 pr-4 font-medium">Ocupación</th><th className="py-2 pr-4 font-medium">SLA/TAT</th><th className="py-2 font-medium">Calidad</th></tr></thead><tbody>{filtered.map((record) => <tr className="border-b last:border-b-0" key={record.branchId}><td className="py-3 pr-4 font-medium">{record.branchName}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.volume)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.occupancy)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.sla)}</td><td className="py-3">{formatNumber(record.dataQuality, "%")}</td></tr>)}</tbody></table></div></section>
 
       <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]"><article className="rounded-lg border bg-card p-4"><div className="mb-3 text-sm font-semibold">Tendencia operativa</div><TrendChart records={filtered} /></article><article className="rounded-lg border bg-card p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold"><UsersRound className="size-4 text-primary" />Gerentes dentro del alcance</div><div className="grid gap-2">{Array.from(new Map(filtered.flatMap((record) => [[`area-${record.operationalAreaId}`, { name: record.areaManagerName, scope: record.operationalAreaName }], [`branch-${record.branchId}`, { name: record.branchManagerName, scope: record.branchName }]])).values()).filter((manager): manager is { name: string; scope: string | null } => Boolean(manager.name)).map((manager) => <div className="rounded-lg border p-3 text-sm" key={`${manager.name}-${manager.scope}`}><div className="font-medium">{manager.name}</div><div className="mt-1 text-xs text-muted-foreground">{manager.scope ?? "Asignación autorizada"}</div></div>)}</div><p className="mt-3 text-xs leading-5 text-muted-foreground">Solo se muestran nombres y asignaciones autorizadas; no se exponen bonos, categoría ni nivel de gestión.</p></article></section>
+      </>}
 
       <footer className="rounded-lg border bg-card p-4 text-xs leading-5 text-muted-foreground">Fuente V7: {snapshot.sourceTables.join(" → ")}. Los faltantes se muestran como “Sin dato” y las sucursales sin cierre permanecen visibles.</footer>
     </section>

@@ -384,6 +384,7 @@ export function MonthlySubmissionCenter({
   const [busy, setBusy] = useState<"save" | "publish" | "upload" | "delete" | "open" | "report" | null>(null);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [blockers, setBlockers] = useState<string[]>([]);
 
   const selectedBranch = selectedAssignment?.branch ?? null;
   const selectedBranchManager = selectedAssignment?.branchManager ?? null;
@@ -449,21 +450,12 @@ export function MonthlySubmissionCenter({
     [formLine, responses],
   );
   const completionPct = completion.total ? Math.round((completion.completed / completion.total) * 100) : 0;
-  const validAttachments = attachments.filter((item) => !["blocked", "failed"].includes(item.parser_status));
-  const hasStructuredAttachment = validAttachments.some((item) => ["xlsx", "xls", "csv"].includes(item.file_extension.toLowerCase()));
-  const hasBlockedAttachment = attachments.some((item) => item.parser_status === "blocked" || item.parser_status === "failed");
   const currentVersionPublished = saved?.status === "published";
-  const canPublishCurrent = Boolean(
+  const canAttemptPublish = Boolean(
     canPublish
     && saved
     && !dirty
-    && !currentVersionPublished
-    && completion.completed === completion.total
-    && validAttachments.length >= 1
-    && validAttachments.length <= 2
-    && hasStructuredAttachment
-    && !hasBlockedAttachment
-    && Boolean(selectedAreaManager),
+    && !currentVersionPublished,
   );
 
   const refreshRecent = useCallback(async () => {
@@ -561,6 +553,9 @@ export function MonthlySubmissionCenter({
       setSaved({ submissionId: body.submission.id, versionId: body.version.id, versionNumber: body.version.version_number, status: body.version.status });
       setDirty(false);
       setWarnings([]);
+      setBlockers(Array.isArray(body.version.validation_summary?.blockers)
+        ? body.version.validation_summary.blockers.filter((value): value is string => typeof value === "string")
+        : []);
       setCurrentStep(0);
       await loadAttachments(body.submission.id, body.version.id);
       setMessage({ type: "ok", text: `Cierre cargado · versión ${body.version.version_number} · ${body.version.status}.` });
@@ -601,7 +596,8 @@ export function MonthlySubmissionCenter({
       setAttachments([]);
       setDirty(false);
       setWarnings(body.validation?.warnings ?? []);
-      setMessage({ type: "ok", text: `Versión ${body.version.version_number} guardada como borrador. Ahora adjunta 1 o 2 archivos y publica cuando el formulario esté completo.` });
+      setBlockers(body.validation?.blockers ?? []);
+      setMessage({ type: "ok", text: `Versión ${body.version.version_number} guardada como borrador. Los pendientes se conservan para resolverlos antes de publicar.` });
       if (showRecent) await refreshRecent();
     } catch (error) {
       setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo guardar el cierre." });
@@ -743,7 +739,7 @@ export function MonthlySubmissionCenter({
   }
 
   async function publish() {
-    if (!saved || !canPublishCurrent) return;
+    if (!saved || !canAttemptPublish) return;
     setBusy("publish");
     setMessage(null);
     try {
@@ -1004,9 +1000,12 @@ export function MonthlySubmissionCenter({
         </CardHeader>
         <CardContent className="grid gap-4">
           {!saved ? (
-            <div className="rounded-lg border border-dashed p-5 text-sm text-muted-foreground">
-              <Save className="mb-2 size-5" /> Guarda primero el formulario para crear una versión auditable y habilitar los adjuntos.
-            </div>
+            <label className="flex cursor-not-allowed flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center text-muted-foreground" aria-disabled="true">
+              <Save className="size-7" />
+              <span className="mt-2 text-sm font-medium">Guarda el borrador para habilitar la carga</span>
+              <span className="mt-1 text-xs">El uploader acepta XLSX, XLS o CSV y un segundo archivo opcional de respaldo.</span>
+              <input className="sr-only" data-testid="monthly-evidence-disabled" disabled type="file" accept={acceptedFiles} />
+            </label>
           ) : dirty ? (
             <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
               Cambiaste el formulario después del último guardado. Guarda una nueva versión antes de adjuntar o publicar.
@@ -1018,7 +1017,7 @@ export function MonthlySubmissionCenter({
                   {busy === "upload" ? <Loader2 className="size-7 animate-spin text-primary" /> : <UploadCloud className="size-7 text-primary" />}
                   <span className="mt-2 text-sm font-medium">{attachments.length === 0 ? "Seleccionar Excel del reporte" : "Agregar archivo de respaldo"}</span>
                   <span className="mt-1 text-xs text-muted-foreground">Obligatorio para publicar: XLSX, XLS o CSV. Opcional como segundo archivo: PDF, Word, PowerPoint, TXT, PNG o JPG · máximo 15 MB c/u</span>
-                  <input className="sr-only" type="file" accept={acceptedFiles} multiple={attachments.length === 0} onChange={(event) => { void uploadFiles(event.target.files); event.currentTarget.value = ""; }} />
+                  <input className="sr-only" data-testid="monthly-evidence-input" type="file" accept={acceptedFiles} multiple={attachments.length === 0} onChange={(event) => { void uploadFiles(event.target.files); event.currentTarget.value = ""; }} />
                 </label>
               )}
 
@@ -1099,6 +1098,11 @@ export function MonthlySubmissionCenter({
           {warnings.length > 0 && (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><AlertCircle className="mr-2 inline size-4" />{warnings.join(" · ")}</div>
           )}
+          {blockers.length > 0 && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900" data-testid="monthly-pending-blockers">
+              <AlertCircle className="mr-2 inline size-4" />Pendientes para publicar: {blockers.join(" · ")}
+            </div>
+          )}
           {message && (
             <div className={`rounded-md border p-3 text-sm ${message.type === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`}>
               {message.type === "ok" ? <CheckCircle2 className="mr-2 inline size-4" /> : <AlertCircle className="mr-2 inline size-4" />}{message.text}
@@ -1112,7 +1116,7 @@ export function MonthlySubmissionCenter({
               </Button>
             )}
             {canPublish && (
-              <Button type="button" variant="outline" onClick={() => void publish()} disabled={busy !== null || !canPublishCurrent}>
+              <Button data-testid="monthly-publish" type="button" variant="outline" onClick={() => void publish()} disabled={busy !== null || !canAttemptPublish}>
                 {busy === "publish" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Send className="mr-2 size-4" />} Publicar cierre
               </Button>
             )}

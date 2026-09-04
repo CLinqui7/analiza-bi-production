@@ -31,6 +31,11 @@ assert.match(form, /monthly-assignment/, "A GS with multiple grants must receive
 assert.match(form, /Pendiente de asignación/, "Missing area management must be explicit, not an empty select.");
 assert.doesNotMatch(form, /Guardar avance DEMO|Publicar cierre DEMO/, "Production form must not contain demo actions.");
 assert.match(monthlyApi, /businessLineId: businessLine\.id/, "Saving must enforce the branch + business-line grant.");
+assert.doesNotMatch(monthlyApi, /validation\.blockers\.length > 0[\s\S]{0,160}VALIDATION_BLOCKED/, "An incomplete draft must persist blockers instead of returning VALIDATION_BLOCKED.");
+assert.match(monthlyApi, /validation_summary:[\s\S]*blockers: draftValidation\.blockers/, "Draft blockers must be persisted in the version validation summary.");
 assert.match(publishApi, /AREA_MANAGER_ASSIGNMENT_REQUIRED/, "Publication must give an actionable error when GA is unassigned.");
+assert.match(publishApi, /INCOMPLETE_MONTHLY_FORM/, "Publication must reject an incomplete saved draft.");
+assert.match(form, /monthly-evidence-disabled/, "The evidence step must show a disabled uploader before the first draft is saved.");
+assert.match(form, /monthly-evidence-input/, "The evidence uploader must be addressable after a draft is saved.");
 
 console.log("manual-monthly-entry: PASS");
