@@ -12,6 +12,8 @@ import {
 import { assertRecordAccess } from "@/lib/v7/security/authorization-policy";
 import { actorForApi, isApiResponse } from "@/lib/v7/server/api-auth";
 import { validateMonthlyResponses } from "@/lib/server/monthly-validation";
+import { createAdminClient } from "@/lib/v7/server/admin-client";
+import { hasSupabaseAdminConfiguration } from "@/lib/v7/server/env";
 import { createClient } from "@/lib/supabase/server";
 
 const schema = z.object({ submissionId: z.string().uuid(), versionId: z.string().uuid() });
@@ -75,7 +77,12 @@ export async function POST(request: Request) {
 
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "INVALID_PAYLOAD" }, { status: 400 });
-  const supabase = await createClient();
+  // Promotion writes the authoritative closing/KPI graph.  It is privileged
+  // server-only work, performed only after actorForApi and assertRecordAccess
+  // have checked the caller and the exact submission scope above.
+  const supabase = hasSupabaseAdminConfiguration()
+    ? createAdminClient()
+    : await createClient();
 
   const [{ data: submissionData }, { data: versionData }] = await Promise.all([
     supabase

@@ -1,6 +1,8 @@
 import "server-only";
 
-const piiKeyPattern = /(patient|paciente|nombre[_ -]?paciente|email|correo|phone|telefono|teléfono|dui|documento|document_number|birth|nacimiento|address|direccion|dirección)/i;
+// Aggregate operational counters such as `patients_total` are not PII. Block
+// only fields that identify an individual patient (name, ID, contact or DOB).
+const piiKeyPattern = /(patient[_ -]?(name|id|identifier|email|phone|address|birth)|paciente[_ -]?(nombre|id|identificador|correo|telefono|direccion|nacimiento)|nombre[_ -]?paciente|email|correo|phone|telefono|teléfono|dui|documento|document_number|birth|nacimiento|address|direccion|dirección)/i;
 
 export type MonthlyValidation = {
   blockers: string[];

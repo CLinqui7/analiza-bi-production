@@ -45,6 +45,34 @@ let driver;
 let authenticatedQaPassed = false;
 const timings = {};
 
+async function cleanupQaOrganization(id) {
+  const submissions = await admin.from("manual_monthly_submissions").select("id").eq("organization_id", id);
+  fail(submissions.error, "QA submission cleanup lookup");
+  const submissionIds = submissions.data.map((item) => item.id);
+  const versions = submissionIds.length > 0
+    ? await admin.from("manual_monthly_submission_versions").select("id").in("submission_id", submissionIds)
+    : { data: [], error: null };
+  fail(versions.error, "QA version cleanup lookup");
+  const versionIds = versions.data.map((item) => item.id);
+  const remove = async (table, column = "organization_id", values = [id]) => {
+    if (values.length === 0) return;
+    const result = await admin.from(table).delete().in(column, values);
+    fail(result.error, `QA ${table} cleanup`);
+  };
+  await remove("manual_monthly_submission_events", "submission_id", submissionIds);
+  await remove("manual_monthly_submission_attachments", "submission_version_id", versionIds);
+  await remove("manual_monthly_submission_versions", "id", versionIds);
+  await remove("manual_monthly_submissions");
+  // Published QA submissions create official closings. Delete the root closing
+  // rows before their scoped branch; dependent KPI and lineage rows cascade.
+  await remove("closing_versions");
+  for (const table of ["audit_logs", "reporting_lines", "directory_assignment_slots", "branch_managers", "manager_assignments", "user_roles", "profiles", "branches", "operational_areas", "business_lines", "companies", "countries"]) {
+    await remove(table);
+  }
+  const deleted = await admin.from("organizations").delete().eq("id", id);
+  fail(deleted.error, "QA organization cleanup");
+}
+
 function fail(error, context) {
   if (error) throw new Error(`${context}: ${error.message}`);
 }
@@ -77,7 +105,8 @@ async function createUser(email) {
 }
 
 async function bodyText() {
-  return driver.findElement(By.css("body")).getText();
+  const body = await driver.wait(until.elementLocated(By.css("body")), 10_000);
+  return body.getText();
 }
 
 async function login(email) {
@@ -509,7 +538,7 @@ try {
   timings.filterApplyMs = Date.now() - filterApplyStartedAt;
   assert.ok(timings.filterApplyMs <= 300, "Applied filters must update locally in under 300 ms.");
   await driver.wait(
-    async () => (await driver.getCurrentUrl()).includes("bi_branch="),
+    async () => (await driver.getCurrentUrl()).includes("branch="),
     10_000,
   );
   const requestCounts = await driver.executeScript(
@@ -612,6 +641,82 @@ try {
     async () => /guardada como borrador/i.test(await bodyText()),
     15_000,
   );
+  assert.ok(
+    (await driver.findElements(By.css("[data-testid=monthly-pending-blockers]"))).length === 1,
+    "An incomplete draft must show publication blockers as pending work.",
+  );
+  const evidenceInput = await driver.findElement(By.css("[data-testid=monthly-evidence-input]"));
+  await evidenceInput.sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
+  await driver.wait(
+    async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()),
+    30_000,
+  );
+  assert.match(await bodyText(), /monthly-evidence\.csv/, "The finalized CSV attachment must be visible.");
+  await driver.executeScript(`window.__qaLastPublish = null; window.__qaLastSave = null; const originalFetch = window.fetch; window.fetch = async (...args) => { const response = await originalFetch(...args); const url = String(args[0]); if (url.includes('/api/monthly-submissions/publish')) { let body = null; try { body = await response.clone().json(); } catch {} window.__qaLastPublish = { status: response.status, body }; } if (url.endsWith('/api/monthly-submissions') && args[1]?.method === 'POST') { window.__qaLastSave = { request: args[1].body, status: response.status }; } return response; };`);
+  await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
+  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 15_000);
+  const incompletePublish = await driver.executeScript("return window.__qaLastPublish;");
+  assert.equal(incompletePublish.status, 422, "Publishing an incomplete draft must be blocked.");
+  assert.equal(incompletePublish.body?.error, "INCOMPLETE_MONTHLY_FORM", "The publish blocker must be explicit.");
+  const formStepCount = (await driver.findElements(By.css("[data-testid=monthly-form-steps] button"))).length - 1;
+  for (let stepIndex = 0; stepIndex < formStepCount; stepIndex += 1) {
+    const formStepButtons = await driver.findElements(By.css("[data-testid=monthly-form-steps] button"));
+    await driver.executeScript("arguments[0].scrollIntoView({ block: 'center' });", formStepButtons[stepIndex]);
+    await formStepButtons[stepIndex].click();
+    await driver.wait(async () => (await driver.findElements(By.css("input[id^=monthly-]"))).length >= 0, 5_000);
+    const inputs = await driver.findElements(By.css("input[id^=monthly-]:not([disabled])"));
+    for (const input of inputs) {
+      const type = await input.getAttribute("type");
+      await input.clear();
+      await input.sendKeys(type === "date" ? "09/30/2026" : type === "month" ? "09/2026" : type === "number" ? "1" : "Cierre QA");
+    }
+    const selects = await driver.findElements(By.css("select:not([disabled])"));
+    for (const select of selects) {
+      const isPeriod = await driver.executeScript("return Boolean(arguments[0].closest('[data-testid=monthly-period]'));", select);
+      if (!isPeriod) {
+        const choices = await select.findElements(By.css("option"));
+        if (choices.length > 1) await choices[1].click();
+      }
+    }
+  }
+  const commercialStep = await driver.findElement(By.xpath("//button[contains(., 'Resultados comerciales')]"));
+  await driver.executeScript("arguments[0].scrollIntoView({ block: 'center' });", commercialStep);
+  await commercialStep.click();
+  const patientsTotal = await driver.wait(until.elementLocated(By.css("#monthly-patients_total")), 10_000);
+  await patientsTotal.clear();
+  await patientsTotal.sendKeys("1");
+  await driver.executeScript("arguments[0].blur();", patientsTotal);
+  await driver.wait(async () => (await patientsTotal.getAttribute("value")) === "1", 5_000);
+  await driver.findElement(By.css("[data-testid=monthly-final-step]")).click();
+  await driver.findElement(By.css("[data-testid=monthly-save-draft]")).click();
+  await driver.wait(async () => /Versión 2 guardada como borrador/.test(await bodyText()), 15_000);
+  const completedSave = JSON.parse(await driver.executeScript("return window.__qaLastSave?.request ?? '{}';"));
+  assert.equal(completedSave.responses?.patients_total, 1, "The completed save must contain patients_total.");
+  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
+  await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
+  await driver.executeScript("window.__qaLastPublish = null;");
+  await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
+  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 30_000);
+  const finalPublish = await driver.executeScript("return window.__qaLastPublish;");
+  assert.equal(finalPublish.status, 200, `Completed draft failed publication: ${JSON.stringify(finalPublish.body)}`);
+  // Chromium may keep a page-load command pending after a multipart upload.
+  // Navigate through the browser context so the bounded dashboard wait below
+  // remains the authoritative readiness check.
+  await driver.executeScript(
+    "window.location.assign(arguments[0]);",
+    `${baseUrl}/protected/cierres`,
+  );
+  await driver.wait(
+    async () => (await driver.getCurrentUrl()).includes("/protected/cierres"),
+    15_000,
+  );
+  await waitForDashboard("Historial de cierres");
+  await capture("history");
+  const historyPage = await bodyText();
+  assert.ok(
+    (await driver.findElements(By.css("[data-testid=bi-history-entry]"))).length >= 1,
+    `The published closing must appear in the distinct history view. ${historyPage}`,
+  );
   await request(
     `/api/monthly-submissions?branchId=${branchA.id}&businessLineId=${line.data.id}`,
   );
@@ -624,19 +729,18 @@ try {
   authenticatedQaPassed = true;
 } finally {
   if (driver) await driver.quit();
-  for (const userId of userIds) {
-    const deleted = await admin.auth.admin.deleteUser(userId);
-    fail(deleted.error, "QA auth cleanup");
-  }
   if (organizationId) {
-    const deleted = await admin.from("organizations").delete().eq("id", organizationId);
-    fail(deleted.error, "QA organization cleanup");
+    await cleanupQaOrganization(organizationId);
     const residue = await admin
       .from("organizations")
       .select("id")
       .eq("id", organizationId);
     fail(residue.error, "QA organization residue check");
     assert.equal(residue.data.length, 0, "QA organization residue must be zero");
+  }
+  for (const userId of userIds) {
+    const deleted = await admin.auth.admin.deleteUser(userId);
+    fail(deleted.error, "QA auth cleanup");
   }
   const authUsers = await admin.auth.admin.listUsers({ perPage: 1000 });
   fail(authUsers.error, "QA auth residue check");

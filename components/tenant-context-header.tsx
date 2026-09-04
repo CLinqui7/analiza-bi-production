@@ -328,6 +328,10 @@ export function TenantContextHeader({
   const scopedBranchAccess = isBranchManagerScopedAccess(currentUserAccess)
     ? currentUserAccess
     : null;
+  const countryLockedByRole =
+    !isDemoEnvironment &&
+    (currentUserAccess?.roleKey === "gerente_operaciones" ||
+      currentUserAccess?.roleKey === "gerente_area");
   const scopedCompanyAccess =
     currentUserAccess?.scope.companyId &&
     currentUserAccess.scope.companyId !== consolidatedCompanyId
@@ -400,8 +404,11 @@ export function TenantContextHeader({
         : [{ id: allChannelsValue, name: allChannelsLabel }],
     [isDemoEnvironment],
   );
-  const effectiveCountryId =
-    scopedCompanyAccess?.scope.countryId ?? countryId;
+  // GO and GA are deliberately anchored to the first server-authorized
+  // country.  The URL is never allowed to promote an out-of-scope country.
+  const effectiveCountryId = countryLockedByRole
+    ? countryOptions[0]?.id ?? countryId
+    : scopedCompanyAccess?.scope.countryId ?? countryId;
   const effectiveCompanyId =
     scopedCompanyAccess?.scope.companyId ?? companyId;
   const selectedCountry = countryOptions.find(
@@ -522,7 +529,9 @@ export function TenantContextHeader({
   const canChooseBusinessLine =
     !isLineLocked && shouldRenderScopedFilter(businessLineOptions, (line) => line.id);
   const canChooseCountry =
-    !scopedCompanyAccess && shouldRenderScopedFilter(countryOptions, (country) => country.id);
+    !countryLockedByRole &&
+    !scopedCompanyAccess &&
+    shouldRenderScopedFilter(countryOptions, (country) => country.id);
   const canChooseOperationalArea =
     !isAreaLocked && shouldRenderScopedFilter(operationalAreas, (area) => area.id);
   const canChooseBranch = shouldRenderScopedFilter(branches, (branch) => branch.id);

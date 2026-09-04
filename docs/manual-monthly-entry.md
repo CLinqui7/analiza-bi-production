@@ -66,6 +66,13 @@ En el prototipo, los cierres guardados por el formulario viven en `localStorage`
 - Archivos comerciales asociados: reporte de examenes medicos y montos vendidos, evaluaciones 360 anonimas y cualquier conector equivalente.
 - Deadline del dia 4 del mes siguiente, estado de puntualidad y efecto en score/bono.
 
+## Borradores, evidencia y publicación
+
+- Guardar borrador siempre crea una versión persistida aunque el formulario esté incompleto. Los campos faltantes y la evidencia pendiente quedan registrados como bloqueadores visibles, no como un error fatal de guardado.
+- La carga de XLSX, XLS o CSV se habilita desde el primer borrador guardado y cada archivo queda asociado a su versión.
+- Publicar vuelve a validar el formulario completo, la evidencia y el alcance autorizado. Un borrador incompleto recibe `INCOMPLETE_MONTHLY_FORM` y no genera un cierre oficial.
+- Resultados, Sucursales e Historial son vistas separadas. Historial muestra versiones, estado, autor, evidencia y reporte; sus filas se filtran por las cinco dimensiones de alcance, incluida la línea de negocio.
+
 ## Calidad y privacidad
 
 - No se deben capturar nombres, telefonos, documentos ni datos clinicos identificables de pacientes.
