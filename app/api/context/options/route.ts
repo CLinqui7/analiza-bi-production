@@ -90,7 +90,33 @@ export async function GET() {
       })),
     };
 
-    return NextResponse.json({ ok: true, options });
+    return NextResponse.json({
+      ok: true,
+      options,
+      // The header consumes this metadata with the same authoritative option
+      // response; it must not build a second client-side scope model.
+      actor: {
+        email: actor.email,
+        requiresPasswordChange: actor.requiresPasswordChange ?? false,
+        roleKey: actor.roleKey,
+        scope: {
+          branchCity: null,
+          branchCode: null,
+          branchId: actor.scope.branchId ?? null,
+          branchName: actor.scope.branchName ?? null,
+          companyId: actor.scope.companyId ?? null,
+          companyName: actor.scope.companyName ?? null,
+          countryId: actor.scope.countryId ?? null,
+          countryName: actor.scope.countryName ?? null,
+          operationalAreaId: actor.scope.operationalAreaId ?? null,
+          operationalAreaName: actor.scope.operationalAreaName ?? null,
+          organizationId: actor.scope.organizationId ?? null,
+          organizationName: null,
+        },
+        scopeGrants: v7Actor.scopeGrants,
+        userId: actor.userId,
+      },
+    });
   } catch (error) {
     console.error("Failed to load official context options", {
       message: error instanceof Error ? error.message : "Unknown error",

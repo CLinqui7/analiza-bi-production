@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { useMemo, useState } from "react";
 import {
   ArrowUpDown,
   BarChart3,
@@ -23,28 +22,6 @@ import { cn } from "@/lib/utils";
 
 type DashboardMode = "branch" | "branches" | "home" | "history" | "results";
 type SortKey = "branch" | "quality" | "revenue" | "score";
-type FilterState = {
-  area: string;
-  branch: string;
-  country: string;
-  line: string;
-  manager: string;
-};
-type FilterOption = { id: string; name: string };
-
-function recordOptions(
-  records: readonly BranchBiRecord[],
-  select: (record: BranchBiRecord) => { id: string | null; name: string | null },
-) {
-  return Array.from(
-    new Map(
-      records.flatMap((record) => {
-        const option = select(record);
-        return option.id && option.name ? [[option.id, { id: option.id, name: option.name }] as const] : [];
-      }),
-    ).values(),
-  );
-}
 
 function metricValue(metric: BranchBiMetric | undefined) {
   return metric?.value ?? null;
@@ -106,67 +83,6 @@ function titleFor(mode: DashboardMode, roleKey: RoleKey) {
   return "Sucursales";
 }
 
-function FilterSelect({
-  label,
-  onChange,
-  options,
-  value,
-}: {
-  label: string;
-  onChange: (value: string) => void;
-  options: readonly FilterOption[];
-  value: string;
-}) {
-  if (options.length < 2) return null;
-
-  return (
-    <label className="grid min-w-40 gap-1 text-xs font-medium text-muted-foreground">
-      {label}
-      <select
-        aria-label={label}
-        className="h-10 rounded-lg border bg-background px-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      >
-        <option value="">Todas</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>{option.name}</option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function AssignmentSelect({
-  onChange,
-  options,
-  value,
-}: {
-  onChange: (value: string) => void;
-  options: readonly { id: string; label: string }[];
-  value: string;
-}) {
-  if (options.length < 2) return null;
-
-  return (
-    <label className="grid min-w-56 gap-1 text-xs font-medium text-muted-foreground">
-      Asignación
-      <select
-        aria-label="Asignación"
-        className="h-10 rounded-lg border bg-background px-2 text-sm text-foreground outline-none focus:ring-2 focus:ring-primary/30"
-        onChange={(event) => onChange(event.target.value)}
-        value={value}
-      >
-        <option value="">Todas mis asignaciones</option>
-        {options.map((option) => (
-          <option key={option.id} value={option.id}>
-            {option.label}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
 
 function TrendChart({ records }: { records: readonly BranchBiRecord[] }) {
   const lines = records
@@ -241,6 +157,25 @@ function Matrix({ records }: { records: readonly BranchBiRecord[] }) {
   );
 }
 
+/** Results is a period aggregate.  It deliberately is not the branch ranking view. */
+function ResultsDashboard({ snapshot }: { snapshot: BranchBiSnapshot }) {
+  const records = snapshot.records;
+  const revenue = sumCurrency(records);
+  const margin = average(records, (record) => metricValue(record.metrics.margin));
+  const volume = records.reduce((total, record) => total + (metricValue(record.metrics.volume) ?? 0), 0);
+  const occupancy = average(records, (record) => metricValue(record.metrics.occupancy));
+  const sla = average(records, (record) => metricValue(record.metrics.sla));
+  return <section className="flex w-full min-w-0 flex-col gap-5 px-4 py-6 lg:px-6" data-testid="official-branch-bi">
+    <header className="grid gap-3"><Badge className="w-fit bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Datos oficiales</Badge><div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-lg border bg-card"><BarChart3 className="size-5 text-primary" /></div><div><h1 className="text-3xl font-semibold tracking-normal">Resultados operativos</h1><p className="mt-1 text-sm leading-6 text-muted-foreground">KPIs agregados, variación, cumplimiento y tendencia del período global seleccionado.</p></div></div></header>
+    {!snapshot.sourceAvailable ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">La fuente V7 no está disponible; no se muestran valores de respaldo.</div> : null}
+    <section className="rounded-lg border bg-card p-4" data-testid="bi-filters"><div className="flex items-center gap-2 text-sm font-semibold"><Target className="size-4 text-primary" />Contexto global aplicado</div><p className="mt-1 text-sm text-muted-foreground">La cabecera es la única fuente de país, línea, área, sucursal, gerente y período.</p></section>
+    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">{[["Facturación", revenue === null ? "Sin dato" : formatMetric({ label: "Facturación", unit: "currency", value: revenue })], ["Margen", formatNumber(margin, "%")], ["Volumen", formatNumber(volume)], ["Ocupación", formatNumber(occupancy, "%")], ["SLA / TAT", formatNumber(sla)]].map(([label, value]) => <article className="rounded-lg border bg-card p-4" key={label}><div className="text-sm text-muted-foreground">{label}</div><div className="mt-2 text-2xl font-semibold">{value}</div><p className="mt-2 text-xs text-muted-foreground">Agregado de KPIs calculables</p></article>)}</section>
+    <section className="rounded-lg border bg-card p-4"><div className="mb-3 text-sm font-semibold">Tendencia de facturación por unidad sucursal + línea</div><TrendChart records={records} /></section>
+    <section className="rounded-lg border bg-card p-4" data-testid="bi-results-aggregate"><div className="mb-3 text-sm font-semibold">Comparación compacta</div><div className="overflow-x-auto"><table className="w-full min-w-[680px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr><th className="py-2 pr-4">Unidad</th><th className="py-2 pr-4">Facturación</th><th className="py-2 pr-4">Margen</th><th className="py-2">Calidad</th></tr></thead><tbody>{records.map((record) => <tr className="border-b last:border-b-0" key={record.recordId}><td className="py-3 pr-4 font-medium">{record.branchName} · {record.businessLineName ?? "Sin línea"}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.margin)}</td><td className="py-3">{formatNumber(record.dataQuality, "%")}</td></tr>)}</tbody></table></div></section>
+    <footer className="rounded-lg border bg-card p-4 text-xs text-muted-foreground">Fuente V7: {snapshot.sourceTables.join(" → ")}. Resultados no contiene ranking, mapa ni heatmap de sucursales.</footer>
+  </section>;
+}
+
 export function OfficialBranchBiDashboard({
   mode,
   roleKey,
@@ -250,85 +185,11 @@ export function OfficialBranchBiDashboard({
   roleKey: RoleKey;
   snapshot: BranchBiSnapshot;
 }) {
-  const pathname = usePathname();
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const [draftFilters, setDraftFilters] = useState<FilterState>(() => ({
-    area: searchParams.get("area") ?? searchParams.get("bi_area") ?? "",
-    branch: searchParams.get("branch") ?? searchParams.get("bi_branch") ?? "",
-    country: searchParams.get("country") ?? searchParams.get("bi_country") ?? "",
-    line: searchParams.get("line") ?? searchParams.get("bi_line") ?? "",
-    manager: searchParams.get("manager") ?? searchParams.get("bi_manager") ?? "",
-  }));
-  const [appliedFilters, setAppliedFilters] = useState<FilterState>(() => ({
-    area: searchParams.get("area") ?? searchParams.get("bi_area") ?? "",
-    branch: searchParams.get("branch") ?? searchParams.get("bi_branch") ?? "",
-    country: searchParams.get("country") ?? searchParams.get("bi_country") ?? "",
-    line: searchParams.get("line") ?? searchParams.get("bi_line") ?? "",
-    manager: searchParams.get("manager") ?? searchParams.get("bi_manager") ?? "",
-  }));
   const [selectedBranchId, setSelectedBranchId] = useState<string | null>(null);
   const [sort, setSort] = useState<{ direction: "asc" | "desc"; key: SortKey }>({ direction: "desc", key: "score" });
   const recordsForRole = snapshot.records;
-  const countries = recordOptions(recordsForRole, (record) => ({ id: record.countryId, name: record.countryName }));
-  const lines = recordOptions(recordsForRole, (record) => ({ id: record.businessLineId, name: record.businessLineName }));
-  const areas = recordOptions(recordsForRole, (record) => ({ id: record.operationalAreaId, name: record.operationalAreaName }));
-  const branches = recordOptions(recordsForRole, (record) => ({ id: record.branchId, name: record.branchName }));
-  const managers = recordOptions(recordsForRole, (record) => ({ id: record.branchManagerName, name: record.branchManagerName }));
-  const isBranchManager = roleKey === "gerente_sucursal";
-  const isCountryLocked = roleKey === "gerente_area" || roleKey === "gerente_operaciones";
-  const assignments = Array.from(
-    new Map(
-      recordsForRole.map((record) => [
-        record.branchId,
-        {
-          id: record.branchId,
-          label: record.businessLineName
-            ? `${record.branchName} · ${record.businessLineName}`
-            : record.branchName,
-        },
-      ]),
-    ).values(),
-  );
-  const hasSelectableFilters = isBranchManager
-    ? assignments.length >= 2
-    : [
-      ...(isCountryLocked ? [] : [countries]),
-      lines,
-      areas,
-      branches,
-      managers,
-    ].some(
-        (options) => options.length >= 2,
-      );
-  useEffect(() => {
-    const fromRoute: FilterState = {
-      area: searchParams.get("area") ?? searchParams.get("bi_area") ?? "",
-      branch: searchParams.get("branch") ?? searchParams.get("bi_branch") ?? "",
-      country: searchParams.get("country") ?? searchParams.get("bi_country") ?? "",
-      line: searchParams.get("line") ?? searchParams.get("bi_line") ?? "",
-      manager: searchParams.get("manager") ?? searchParams.get("bi_manager") ?? "",
-    };
-    setDraftFilters(fromRoute);
-    setAppliedFilters(fromRoute);
-    setSelectedBranchId(null);
-  }, [searchParams]);
-  const filtered = useMemo(() => recordsForRole.filter((record) => (
-    (!appliedFilters.country || record.countryId === appliedFilters.country)
-    && (!appliedFilters.line || record.businessLineId === appliedFilters.line)
-    && (!appliedFilters.area || record.operationalAreaId === appliedFilters.area)
-    && (!appliedFilters.branch || record.branchId === appliedFilters.branch)
-    && (!appliedFilters.manager || record.branchManagerName === appliedFilters.manager)
-  )), [appliedFilters, recordsForRole]);
-  const history = useMemo(() => snapshot.history.filter((entry) => {
-    const record = recordsForRole.find((candidate) => candidate.branchId === entry.branchId);
-    return Boolean(record)
-      && (!appliedFilters.country || record?.countryId === appliedFilters.country)
-      && (!appliedFilters.area || record?.operationalAreaId === appliedFilters.area)
-      && (!appliedFilters.branch || entry.branchId === appliedFilters.branch)
-      && (!appliedFilters.line || entry.businessLineId === appliedFilters.line)
-      && (!appliedFilters.manager || record?.branchManagerName === appliedFilters.manager);
-  }), [appliedFilters, recordsForRole, snapshot.history]);
+  const filtered = recordsForRole;
+  const history = snapshot.history;
   const ranking = useMemo(() => [...filtered].sort((left, right) => {
     const valueFor = (record: BranchBiRecord) => {
       if (sort.key === "branch") return record.branchName;
@@ -342,29 +203,12 @@ export function OfficialBranchBiDashboard({
       : Number(leftValue) - Number(rightValue);
     return sort.direction === "asc" ? comparison : -comparison;
   }), [filtered, sort]);
-  const selected = ranking.find((record) => record.branchId === selectedBranchId) ?? ranking[0] ?? null;
-  const hasChanges = JSON.stringify(draftFilters) !== JSON.stringify(appliedFilters);
+  const selected = ranking.find((record) => record.recordId === selectedBranchId) ?? ranking[0] ?? null;
   const publishedCount = filtered.filter((record) => record.hasPublishedClosing).length;
   const revenue = sumCurrency(filtered);
   const quality = average(filtered, (record) => record.dataQuality);
 
-  function updateDraft(key: keyof FilterState, value: string) {
-    setDraftFilters((current) => ({ ...current, [key]: value }));
-  }
-
-  function applyFilters() {
-    const params = new URLSearchParams(searchParams.toString());
-    const entries: Array<[keyof FilterState, string]> = [
-      ["country", "country"], ["line", "line"], ["area", "area"], ["branch", "branch"], ["manager", "manager"],
-    ];
-    for (const [key, parameter] of entries) {
-      if (draftFilters[key]) params.set(parameter, draftFilters[key]);
-      else params.delete(parameter);
-    }
-    setAppliedFilters({ ...draftFilters });
-    setSelectedBranchId(null);
-    router.replace(`${pathname}${params.size > 0 ? `?${params.toString()}` : ""}`);
-  }
+  if (mode === "results") return <ResultsDashboard snapshot={snapshot} />;
 
   function toggleSort(key: SortKey) {
     setSort((current) => current.key === key
@@ -391,26 +235,9 @@ export function OfficialBranchBiDashboard({
 
       {!snapshot.sourceAvailable ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">La fuente V7 no está disponible para esta sesión. No se muestran valores de respaldo.</div> : null}
 
-      <section className="grid gap-3 rounded-lg border bg-card p-4" data-applied-branch={appliedFilters.branch || "all"} data-testid="bi-filters">
-        <div className="flex items-center gap-2 text-sm font-semibold"><Target className="size-4 text-primary" />Filtros de análisis</div>
-        <div className="flex flex-wrap gap-3">
-          {isBranchManager ? (
-            <AssignmentSelect
-              onChange={(value) => updateDraft("branch", value)}
-              options={assignments}
-              value={draftFilters.branch}
-            />
-          ) : (
-            <>
-              {!isCountryLocked && <FilterSelect label="País" onChange={(value) => updateDraft("country", value)} options={countries} value={draftFilters.country} />}
-              <FilterSelect label="Línea" onChange={(value) => updateDraft("line", value)} options={lines} value={draftFilters.line} />
-              <FilterSelect label="Área" onChange={(value) => updateDraft("area", value)} options={areas} value={draftFilters.area} />
-              <FilterSelect label="Sucursal" onChange={(value) => updateDraft("branch", value)} options={branches} value={draftFilters.branch} />
-              <FilterSelect label="Gerente de sucursal" onChange={(value) => updateDraft("manager", value)} options={managers} value={draftFilters.manager} />
-            </>
-          )}
-          {hasSelectableFilters ? <button className="mt-auto h-10 rounded-lg bg-primary px-4 text-sm font-semibold text-primary-foreground disabled:cursor-not-allowed disabled:opacity-60" data-testid="bi-apply-filters" disabled={!hasChanges} onClick={applyFilters} type="button">Aplicar filtros</button> : null}
-        </div>
+      <section className="rounded-lg border bg-card p-4" data-testid="bi-filters">
+        <div className="flex items-center gap-2 text-sm font-semibold"><Target className="size-4 text-primary" />Contexto global aplicado</div>
+        <p className="mt-1 text-sm text-muted-foreground">País, línea, área, sucursal, gerente y período se controlan exclusivamente desde la cabecera. Los datos mostrados ya fueron consultados con ese alcance.</p>
       </section>
 
       {mode === "history" ? (
@@ -445,16 +272,16 @@ export function OfficialBranchBiDashboard({
           ["Cierres publicados", String(publishedCount), "periodo más reciente por sucursal"],
           ["Sin cierre", String(filtered.length - publishedCount), "no se reemplaza con cero"],
           ["Facturación", revenue === null ? "Sin dato" : new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 0, style: "currency" }).format(revenue), revenue === null ? "seleccione un país o publique un KPI" : "suma de KPIs calculables"],
-          ["Meta aprobada", "Sin meta aprobada", "no existe tabla V7 aprobada"],
-          ["Cumplimiento", "Sin resultado", "requiere meta aprobada y KPI calculable"],
+          ["Unidad BI", "Sucursal + línea", "nunca se mezclan líneas de negocio"],
+          ["Resultado", "Comparativo por sucursal", "el propósito depende de la vista"],
           ["Calidad de datos", formatNumber(quality, "%"), "score registrado en cierres publicados"],
           ["Puntaje comparable", formatMetric(selected?.metrics.score), "solo cuando existe KPI oficial"],
         ].map(([label, value, note]) => <article className="rounded-lg border bg-card p-4" key={label}><div className="text-sm text-muted-foreground">{label}</div><div className="mt-2 text-2xl font-semibold tracking-normal">{value}</div><p className="mt-2 text-xs leading-5 text-muted-foreground">{note}</p></article>)}
       </section>
 
-      <section className="rounded-lg border bg-card p-4" data-testid={mode === "results" ? "bi-results-by-branch" : "bi-branches-ranking"}>
-        <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><BarChart3 className="size-4 text-primary" />{mode === "results" ? "Desglose de resultados por sucursal" : "Ranking integral de sucursales"}</div>
-        <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr>{([ ["branch", "Sucursal"], ["score", "Puntaje"], ["revenue", "Facturación"], ["quality", "Calidad"] ] as Array<[SortKey, string]>).map(([key, label]) => <th className="py-2 pr-4" key={key}><button aria-label={`Ordenar por ${label}`} className="inline-flex items-center gap-1 font-medium hover:text-foreground" data-sort-direction={sort.key === key ? sort.direction : "none"} onClick={() => toggleSort(key)} type="button">{label}<ArrowUpDown className="size-3" /></button></th>)}<th className="py-2 pr-4 font-medium">Margen</th><th className="py-2 pr-4 font-medium">Estado</th><th className="py-2 font-medium">Gerente</th></tr></thead><tbody>{ranking.map((record) => { const state = status(record); return <tr className={cn("cursor-pointer border-b last:border-b-0 hover:bg-muted/40", selected?.branchId === record.branchId && "bg-primary/5")} key={record.branchId} onClick={() => setSelectedBranchId(record.branchId)}><td className="py-3 pr-4 font-medium">{record.branchName}<div className="text-xs font-normal text-muted-foreground">{record.operationalAreaName ?? "Sin área asignada"}</div></td><td className="py-3 pr-4">{formatMetric(record.metrics.score)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatNumber(record.dataQuality, "%")}</td><td className="py-3 pr-4">{formatMetric(record.metrics.margin)}</td><td className="py-3 pr-4"><Badge className={state.className}>{state.label}</Badge></td><td className="py-3">{record.branchManagerName ?? "Sin gerente asignado"}</td></tr>; })}</tbody></table></div>
+      <section className="rounded-lg border bg-card p-4" data-testid="bi-branches-ranking">
+        <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><BarChart3 className="size-4 text-primary" />Ranking integral de sucursales</div>
+        <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr>{([ ["branch", "Sucursal"], ["score", "Puntaje"], ["revenue", "Facturación"], ["quality", "Calidad"] ] as Array<[SortKey, string]>).map(([key, label]) => <th className="py-2 pr-4" key={key}><button aria-label={`Ordenar por ${label}`} className="inline-flex items-center gap-1 font-medium hover:text-foreground" data-sort-direction={sort.key === key ? sort.direction : "none"} onClick={() => toggleSort(key)} type="button">{label}<ArrowUpDown className="size-3" /></button></th>)}<th className="py-2 pr-4 font-medium">Margen</th><th className="py-2 pr-4 font-medium">Estado</th><th className="py-2 font-medium">Gerente</th></tr></thead><tbody>{ranking.map((record) => { const state = status(record); return <tr className={cn("cursor-pointer border-b last:border-b-0 hover:bg-muted/40", selected?.recordId === record.recordId && "bg-primary/5")} key={record.recordId} onClick={() => setSelectedBranchId(record.recordId)}><td className="py-3 pr-4 font-medium">{record.branchName}<div className="text-xs font-normal text-muted-foreground">{record.businessLineName ?? "Sin línea"} · {record.operationalAreaName ?? "Sin área asignada"}</div></td><td className="py-3 pr-4">{formatMetric(record.metrics.score)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatNumber(record.dataQuality, "%")}</td><td className="py-3 pr-4">{formatMetric(record.metrics.margin)}</td><td className="py-3 pr-4"><Badge className={state.className}>{state.label}</Badge></td><td className="py-3">{record.branchManagerName ?? "Sin gerente asignado"}</td></tr>; })}</tbody></table></div>
         {ranking.length === 0 ? <p className="py-6 text-sm text-muted-foreground">No hay sucursales que coincidan con los filtros aplicados.</p> : null}
       </section>
 

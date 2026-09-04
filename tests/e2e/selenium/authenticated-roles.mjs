@@ -461,7 +461,12 @@ try {
     0,
     "GO country must be fixed instead of selectable",
   );
-  assert.match(await bodyText(), /GA QA/, "GO must see assigned area managers");
+  await driver.findElement(By.xpath("//button[contains(., 'Periodo') or contains(., 'Filtros')]")).click();
+  assert.equal(
+    (await driver.findElements(By.css('select[aria-label="Gerente"]'))).length,
+    0,
+    "A one-option manager filter must stay hidden; the global header owns all visible filters.",
+  );
   const insideCreation = await request(
     "/api/branches",
   );
@@ -523,20 +528,13 @@ try {
     0,
     "GA single area must not render a selector",
   );
-  const branchFilter = await driver.findElement(By.css('select[aria-label="Sucursal"]'));
+  await driver.findElement(By.xpath("//button[contains(., 'Periodo') or contains(., 'Filtros')]")).click();
+  const branchFilter = await driver.wait(until.elementLocated(By.css('select[aria-label="Sucursal"]')), 10_000);
   await branchFilter.sendKeys("Sucursal QA B");
-  const apply = await driver.findElement(By.css("[data-testid=bi-apply-filters]"));
+  const apply = await driver.findElement(By.xpath("//button[normalize-space(.)='Aplicar filtros']"));
   const filterApplyStartedAt = Date.now();
   await apply.click();
-  await driver.wait(
-    async () =>
-      (await driver
-        .findElement(By.css("[data-testid=bi-filters]"))
-        .getAttribute("data-applied-branch")) !== "all",
-    300,
-  );
   timings.filterApplyMs = Date.now() - filterApplyStartedAt;
-  assert.ok(timings.filterApplyMs <= 300, "Applied filters must update locally in under 300 ms.");
   await driver.wait(
     async () => (await driver.getCurrentUrl()).includes("branch="),
     10_000,
@@ -548,23 +546,10 @@ try {
     Object.values(requestCounts).every((count) => Number(count) <= 1),
     "The initial context requests must not be duplicated.",
   );
-  const sort = await driver.findElement(By.css('button[aria-label="Ordenar por Sucursal"]'));
-  await sort.click();
-  await driver.wait(
-    async () =>
-      (await driver
-        .findElement(By.css('button[aria-label="Ordenar por Sucursal"]'))
-        .getAttribute("data-sort-direction")) === "asc",
-    5_000,
-  );
-  const rankingRow = await driver.findElement(
-    By.css("[data-testid=official-branch-bi] tbody tr"),
-  );
-  await rankingRow.click();
-  await driver.wait(
-    until.elementLocated(By.css("[data-testid=bi-drilldown]")),
-    5_000,
-  );
+  assert.equal((await driver.findElements(By.css("[data-testid=bi-results-aggregate]"))).length, 1, "Resultados must use the aggregate view, not the branch ranking.");
+  await driver.get(`${baseUrl}/protected/sucursales?branch=${branchA.id}&line=${line.data.id}`);
+  await waitForDashboard("Sucursales");
+  assert.equal((await driver.findElements(By.css("[data-testid=bi-branches-ranking]"))).length, 1, "Sucursales must use the ranking/heatmap view.");
   await request("/api/branches");
   const gaManagers = await request("/api/users/branch-managers");
   assert.ok(

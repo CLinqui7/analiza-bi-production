@@ -49,8 +49,8 @@ for (const expected of [
 }
 
 for (const expected of [
-  "fetchCurrentUserAccess",
   "/api/context/options",
+  "payload.actor",
   "isBranchManagerScopedAccess",
   "branchOptions",
   "operationalAreaOptions",

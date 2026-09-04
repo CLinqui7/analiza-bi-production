@@ -17,7 +17,8 @@
         "verify:supabase:readonly": "node scripts/verify-supabase-readonly.mjs",
         "scan:secrets": "node scripts/secret-scan.mjs",
         "import:ddddd2": "node scripts/import-ddddd2-directory.mjs",
-        "test:e2e:selenium": "node tests/e2e/selenium/run-all.mjs",
+        "test:production-directory-integrity": "node scripts/test-production-directory-integrity.mjs",
+        "test:e2e:selenium": "node tests/e2e/selenium/run-all.mjs && node tests/e2e/selenium/authenticated-roles.mjs",
         "test:e2e:selenium:authenticated": "node tests/e2e/selenium/authenticated-roles.mjs",
         "test:e2e:selenium:production": "node tests/e2e/selenium/run-all.mjs",
         "release:gate": "node scripts/release-gate.mjs"

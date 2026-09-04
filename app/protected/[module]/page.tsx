@@ -30,11 +30,13 @@ type ModulePageProps = {
     module: string;
   }>;
   searchParams?: Promise<{
+    area?: string;
     branch?: string;
     company?: string;
     country?: string;
     from?: string;
     line?: string;
+    manager?: string;
     to?: string;
   }>;
 };
@@ -110,7 +112,8 @@ export default async function ModulePage({
   }
 
   if (module === "sucursales") {
-    return <BranchBiServerDashboard actor={actor} mode="branches" />;
+    const context = searchParams ? await searchParams : {};
+    return <BranchBiServerDashboard actor={actor} filter={{ areaId: context.area, branchId: context.branch, businessLineId: context.line, countryId: context.country, managerId: context.manager, periodStart: context.from, periodEnd: context.to }} mode="branches" />;
   }
 
   if (module === "profesionales") {

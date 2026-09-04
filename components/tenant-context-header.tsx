@@ -53,11 +53,7 @@ import {
   toGlobalFilterSearchParams,
   type GlobalFilterInput,
 } from "@/lib/analytics/global-filters";
-import {
-  fetchCurrentUserAccess,
-  isBranchManagerScopedAccess,
-  type CurrentUserAccess,
-} from "@/lib/tenant/current-user-access";
+import { isBranchManagerScopedAccess, type CurrentUserAccess } from "@/lib/tenant/current-user-access";
 import { shouldRenderScopedFilter } from "@/lib/analytics/filter-visibility";
 
 const demoBusinessLineStorageKey = "analiza:demo-business-line";
@@ -78,6 +74,7 @@ type HeaderContextOptions = {
 };
 
 type OfficialContextOptionsResponse = {
+  actor?: CurrentUserAccess;
   ok?: boolean;
   options?: HeaderContextOptions;
 };
@@ -565,20 +562,6 @@ export function TenantContextHeader({
     canChooseChannel;
 
   useEffect(() => {
-    let isMounted = true;
-
-    fetchCurrentUserAccess().then((access) => {
-      if (isMounted) {
-        setCurrentUserAccess(access);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  useEffect(() => {
     if (isDemoEnvironment) {
       setOfficialContextOptions(null);
       return;
@@ -597,10 +580,12 @@ export function TenantContextHeader({
             ? payload.options
             : emptyOfficialContextOptions,
         );
+        setCurrentUserAccess(payload?.ok === true ? payload.actor ?? null : null);
       })
       .catch(() => {
         if (isMounted) {
           setOfficialContextOptions(emptyOfficialContextOptions);
+          setCurrentUserAccess(null);
         }
       });
 

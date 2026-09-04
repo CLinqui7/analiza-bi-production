@@ -1,4 +1,5 @@
 import { getBranchBiSnapshot } from "@/lib/v7/server/branch-bi-snapshot";
+import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 
@@ -127,6 +128,41 @@ function average(values: readonly (number | null)[]) {
     : null;
 }
 
+type TargetRow = Record<string, unknown>;
+
+function text(row: TargetRow, ...keys: string[]) {
+  const value = keys.map((key) => row[key]).find((candidate) => typeof candidate === "string");
+  return typeof value === "string" ? value : null;
+}
+
+function number(row: TargetRow, ...keys: string[]) {
+  const value = keys.map((key) => row[key]).find((candidate) => typeof candidate === "number" || typeof candidate === "string");
+  const parsed = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function targetMetricKey(kpi: string) {
+  const normalized = kpi.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+  if (/(venta|revenue|facturacion|ingreso)/.test(normalized)) return "revenue" as const;
+  if (/(margen|margin)/.test(normalized)) return "margin" as const;
+  if (/(ocupacion|occupancy|utilizacion)/.test(normalized)) return "occupancy" as const;
+  if (/(sla|tat|turnaround)/.test(normalized)) return "sla" as const;
+  if (/(puntaje|score|performance)/.test(normalized)) return "score" as const;
+  if (/(orden|paciente|sesion|estudio|volumen|volume)/.test(normalized)) return "volume" as const;
+  return null;
+}
+
+function isApprovedTarget(row: TargetRow, filter: OfficialDashboardFilter) {
+  const status = text(row, "status")?.toLowerCase();
+  const approvedAt = text(row, "approved_at");
+  const period = text(row, "period_start", "period_month") ?? "";
+  return row.is_demo !== true
+    && (status === "active" || status === "approved")
+    && Boolean(approvedAt || status === "approved")
+    && (!filter.periodStart || period >= filter.periodStart.slice(0, 7))
+    && (!filter.periodEnd || period <= filter.periodEnd.slice(0, 7));
+}
+
 /**
  * Production executive BI reads the V7 Supabase schema only. There is no
  * PostgreSQL compatibility fallback: an unavailable source stays unavailable
@@ -136,7 +172,7 @@ export async function getOfficialExecutiveSnapshot(
   actor: AuthorizationActor,
   filter: OfficialDashboardFilter = {},
 ): Promise<OfficialExecutiveSnapshot> {
-  const branchSnapshot = await getBranchBiSnapshot(actor);
+  const branchSnapshot = await getBranchBiSnapshot(actor, filter);
   const scopedRecords = branchSnapshot.records.filter(
     (record) =>
       (isWildcard(filter.countryId) || record.countryId === filter.countryId) &&
@@ -155,6 +191,39 @@ export async function getOfficialExecutiveSnapshot(
       .filter(Boolean)
       .sort()
       .at(-1) ?? null;
+  const admin = getSupabaseAdminClient();
+  const targetResult = admin
+    ? await admin.from("kpi_targets").select("*").eq("organization_id", actor.scope.organizationId).in("branch_id", scopedRecords.map((record) => record.branchId))
+    : { data: [] as TargetRow[] };
+  const targets = ((targetResult.data ?? []) as TargetRow[]).filter((target) => isApprovedTarget(target, filter));
+  const targetComparisons = targets.flatMap<OfficialTargetComparison>((target) => {
+    const branchId = text(target, "branch_id");
+    const lineId = text(target, "business_line_id");
+    const lineCode = text(target, "business_line");
+    const record = scopedRecords.find((candidate) => candidate.branchId === branchId && (!lineId || candidate.businessLineId === lineId) && (!lineCode || candidate.businessLineCode === lineCode));
+    const kpiId = text(target, "kpi_code", "kpi_id") ?? "unknown";
+    const targetValue = number(target, "target_value");
+    const key = targetMetricKey(kpiId);
+    const officialLine = asOfficialLine(record?.businessLineCode ?? null);
+    if (!record || !officialLine || targetValue === null) return [];
+    const actualValue = key ? record.metrics[key]?.value ?? null : null;
+    const direction = text(target, "direction") ?? "HIGHER_IS_BETTER";
+    const compliance = actualValue === null ? null : direction === "LOWER_IS_BETTER" ? targetValue / Math.max(actualValue, Number.EPSILON) : actualValue / Math.max(targetValue, Number.EPSILON);
+    return [{
+      actualValue,
+      branchName: record.branchName,
+      businessLine: officialLine,
+      compliance,
+      kpiId,
+      kpiLabel: text(target, "kpi_name", "label") ?? kpiId,
+      lineName: lineNames[officialLine],
+      period: (text(target, "period_start", "period_month") ?? record.latestPeriod ?? "").slice(0, 7),
+      status: compliance === null ? "sin_resultado" : compliance >= 1 ? "cumplido" : compliance >= 0.9 ? "vigilar" : "critico",
+      targetValue,
+      unit: text(target, "unit") === "ratio" ? "ratio" : text(target, "unit") === "count" ? "count" : "currency",
+      variance: actualValue === null ? null : actualValue - targetValue,
+    }];
+  });
   const lineSummaries = (
     Object.keys(lineNames) as OfficialBusinessLineCode[]
   ).flatMap((businessLine) => {
@@ -179,9 +248,9 @@ export async function getOfficialExecutiveSnapshot(
         publishedClosings: records.length,
         qualityScore: average(records.map((record) => record.dataQuality)),
         revenueActual,
-        revenueCompliance: null,
-        revenueTarget: null,
-        status: "sin_meta" as const,
+        revenueCompliance: (() => { const values = targetComparisons.filter((target) => target.businessLine === businessLine && targetMetricKey(target.kpiId) === "revenue").map((target) => target.compliance); return average(values); })(),
+        revenueTarget: sum(targetComparisons.filter((target) => target.businessLine === businessLine && targetMetricKey(target.kpiId) === "revenue").map((target) => target.targetValue)),
+        status: (() => { const compliance = average(targetComparisons.filter((target) => target.businessLine === businessLine && targetMetricKey(target.kpiId) === "revenue").map((target) => target.compliance)); if (compliance === null) return "sin_meta" as const; return compliance >= 1 ? "cumplido" as const : compliance >= .9 ? "vigilar" as const : "critico" as const; })(),
       },
     ];
   });
@@ -230,14 +299,14 @@ export async function getOfficialExecutiveSnapshot(
     lineSummaries,
     period,
     sourceTables: branchSnapshot.sourceTables,
-    targetComparisons: [],
+    targetComparisons,
     totals: {
-      approvedTargets: 0,
+      approvedTargets: targetComparisons.length,
       officialInsights: insights.length,
       publishedClosings: publishedRecords.length,
       revenueActual,
-      revenueCompliance: null,
-      revenueTarget: null,
+      revenueCompliance: average(targetComparisons.filter((target) => targetMetricKey(target.kpiId) === "revenue").map((target) => target.compliance)),
+      revenueTarget: sum(targetComparisons.filter((target) => targetMetricKey(target.kpiId) === "revenue").map((target) => target.targetValue)),
     },
   };
 }

@@ -27,11 +27,15 @@ export type BranchBiTrendPoint = {
 };
 
 export type BranchBiRecord = {
+  /** Stable BI grain: one branch and one business line, never a branch alone. */
+  recordId: string;
   branchId: string;
   branchName: string;
   branchCode: string;
   areaManagerName: string | null;
+  areaManagerId: string | null;
   branchManagerName: string | null;
+  branchManagerId: string | null;
   businessLineCode: string | null;
   businessLineId: string | null;
   businessLineName: string | null;
@@ -47,6 +51,16 @@ export type BranchBiRecord = {
   operationalAreaName: string | null;
   status: "published" | "quality_review" | "no_published_closing";
   trend: BranchBiTrendPoint[];
+};
+
+export type BranchBiFilter = {
+  areaId?: string;
+  branchId?: string;
+  businessLineId?: string;
+  countryId?: string;
+  managerId?: string;
+  periodEnd?: string;
+  periodStart?: string;
 };
 
 export type BranchBiInsight = {
@@ -176,17 +190,19 @@ function metricFrom(row: ClosingKpiRow): BranchBiMetric | null {
   };
 }
 
-function latestByBranch(
+function latestByBranchLine(
   versions: readonly ClosingVersionRow[],
   branchId: string,
+  businessLineId: string | null,
 ) {
   return versions
-    .filter((version) => version.branch_id === branchId)
+    .filter((version) => version.branch_id === branchId && version.business_line_id === businessLineId)
     .sort((left, right) => periodFor(right).localeCompare(periodFor(left)))[0] ?? null;
 }
 
 async function getBranchBiSnapshotUncached(
   actor: AuthorizationActor,
+  filter: BranchBiFilter = {},
 ): Promise<BranchBiSnapshot> {
   const admin = getSupabaseAdminClient();
   const generatedAt = new Date().toISOString();
@@ -212,13 +228,16 @@ async function getBranchBiSnapshotUncached(
     return { generatedAt, history: [], historyStatus: "scope_empty", insights: [], records: [], sourceAvailable: true, sourceTables };
   }
 
-  const versionsResult = await admin
+  let versionsQuery = admin
     .from("closing_versions")
     .select("id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,published_at,quality_score")
     .eq("organization_id", actor.scope.organizationId)
     .in("branch_id", visibleBranchIds)
     .eq("is_demo", false)
     .in("status", ["PUBLISHED", "published"]);
+  if (filter.periodStart) versionsQuery = versionsQuery.gte("period_end", filter.periodStart);
+  if (filter.periodEnd) versionsQuery = versionsQuery.lte("period_start", filter.periodEnd);
+  const versionsResult = await versionsQuery;
 
   const versions = ((versionsResult.data ?? []) as ClosingVersionRow[]).filter((version) =>
     actorCanSee(v7Actor, {
@@ -247,21 +266,26 @@ async function getBranchBiSnapshotUncached(
       .eq("is_demo", false)
       .order("created_at", { ascending: false })
       .limit(20),
-    admin
+    (() => {
+      let query = admin
       .from("manual_monthly_submissions")
       .select("id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start")
       .eq("organization_id", actor.scope.organizationId)
       .in("branch_id", visibleBranchIds)
-      .eq("is_demo", false),
+      .eq("is_demo", false);
+      if (filter.periodStart) query = query.gte("period_start", filter.periodStart);
+      if (filter.periodEnd) query = query.lte("period_start", filter.periodEnd);
+      return query;
+    })(),
   ]);
   const kpis = (kpisResult.data ?? []) as ClosingKpiRow[];
   const areasById = new Map(context.operationalAreas.map((area) => [area.id, area]));
   const countriesById = new Map(context.countries.map((country) => [country.id, country]));
   const branchManagersByBranchId = new Map(
-    context.branchManagers.map((manager) => [manager.branchId, manager.name]),
+    context.branchManagers.map((manager) => [manager.branchId, manager]),
   );
   const areaManagersByAreaId = new Map(
-    context.areaManagers.map((manager) => [manager.operationalAreaId, manager.name]),
+    context.areaManagers.map((manager) => [manager.operationalAreaId, manager]),
   );
   const linesById = new Map(context.businessLines.map((line) => [line.id, line]));
   const manualSubmissions = ((submissionsResult.data ?? []) as ManualSubmissionRow[]).filter((submission) =>
@@ -336,16 +360,27 @@ async function getBranchBiSnapshotUncached(
     kpisByVersion.set(kpi.closing_version_id, rows);
   }
 
-  const records = context.branches
-    .map((branch): BranchBiRecord => {
-      const latestVersion = latestByBranch(versions, branch.id);
+  const branchLineEntries: Array<[string, { branchId: string; businessLineId: string | null }]> = [
+    ...versions.map((version): [string, { branchId: string; businessLineId: string | null }] => [`${version.branch_id}:${version.business_line_id ?? "unassigned"}`, { branchId: version.branch_id, businessLineId: version.business_line_id }]),
+    ...context.monthlyAssignments.map((assignment): [string, { branchId: string; businessLineId: string | null }] => [assignment.id, { branchId: assignment.branch.id, businessLineId: assignment.businessLine.id }]),
+    // Catalog branches remain visible before their first closing, at the one
+    // applicable business line for their company.  Published versions above
+    // add any additional branch+line combinations explicitly.
+    ...context.branches.flatMap((branch): Array<[string, { branchId: string; businessLineId: string | null }]> => context.businessLines
+      .filter((line) => line.parentId === branch.parentId)
+      .map((line) => [`${branch.id}:${line.id}`, { branchId: branch.id, businessLineId: line.id }])),
+  ];
+  const branchLineKeys = Array.from(new Map(branchLineEntries).values());
+  const records = branchLineKeys
+    .flatMap(({ branchId, businessLineId }): BranchBiRecord[] => {
+      const branch = context.branches.find((item) => item.id === branchId);
+      if (!branch) return [];
+      const latestVersion = latestByBranchLine(versions, branch.id, businessLineId);
       const area = branch.operationalAreaId
         ? areasById.get(branch.operationalAreaId)
         : null;
       const country = branch.countryId ? countriesById.get(branch.countryId) : null;
-      const line = latestVersion?.business_line_id
-        ? linesById.get(latestVersion.business_line_id)
-        : context.businessLines.find((item) => item.parentId === branch.parentId) ?? null;
+      const line = businessLineId ? linesById.get(businessLineId) ?? null : null;
       const latestMetrics: Partial<Record<BranchBiMetricKey, BranchBiMetric>> = {};
 
       for (const kpi of latestVersion ? kpisByVersion.get(latestVersion.id) ?? [] : []) {
@@ -355,7 +390,7 @@ async function getBranchBiSnapshotUncached(
       }
 
       const trend = versions
-        .filter((version) => version.branch_id === branch.id)
+        .filter((version) => version.branch_id === branch.id && version.business_line_id === businessLineId)
         .sort((left, right) => periodFor(left).localeCompare(periodFor(right)))
         .map((version) => {
           const revenue = (kpisByVersion.get(version.id) ?? [])
@@ -367,14 +402,17 @@ async function getBranchBiSnapshotUncached(
         ? asFiniteNumber(latestVersion.quality_score)
         : null;
 
-      return {
+      const branchManager = branchManagersByBranchId.get(branch.id) ?? null;
+      const areaManager = branch.operationalAreaId ? areaManagersByAreaId.get(branch.operationalAreaId) ?? null : null;
+      const record: BranchBiRecord = {
+        recordId: `${branch.id}:${businessLineId ?? "unassigned"}`,
         branchId: branch.id,
         branchName: branch.name,
         branchCode: branch.code ?? branch.id,
-        areaManagerName: branch.operationalAreaId
-          ? areaManagersByAreaId.get(branch.operationalAreaId) ?? null
-          : null,
-        branchManagerName: branchManagersByBranchId.get(branch.id) ?? null,
+        areaManagerId: areaManager?.id ?? null,
+        areaManagerName: areaManager?.name ?? null,
+        branchManagerId: branchManager?.id ?? null,
+        branchManagerName: branchManager?.name ?? null,
         businessLineCode: line?.code ?? null,
         businessLineId: line?.id ?? null,
         businessLineName: line?.name ?? null,
@@ -395,7 +433,15 @@ async function getBranchBiSnapshotUncached(
             : "published",
         trend,
       };
+      return [record];
     })
+    .filter((record) =>
+      (!filter.countryId || record.countryId === filter.countryId)
+      && (!filter.businessLineId || record.businessLineId === filter.businessLineId)
+      && (!filter.areaId || record.operationalAreaId === filter.areaId)
+      && (!filter.branchId || record.branchId === filter.branchId)
+      && (!filter.managerId || record.branchManagerId === filter.managerId || record.areaManagerId === filter.managerId),
+    )
     .sort((left, right) => left.branchName.localeCompare(right.branchName, "es"));
   const namesByBranchId = new Map(records.map((record) => [record.branchId, record.branchName]));
   const insights = ((insightsResult.data ?? []) as InsightRow[]).map((insight) => ({

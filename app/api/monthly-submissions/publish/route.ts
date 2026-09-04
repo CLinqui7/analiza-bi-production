@@ -208,6 +208,21 @@ export async function POST(request: Request) {
     is_demo: false,
   }).select("id").single();
   if (closingError || !closing) return NextResponse.json({ error: closingError?.message ?? "CLOSING_CREATE_FAILED" }, { status: 400 });
+  const closingId = String(closing.id);
+
+  // The closing is intentionally invisible until the final RPC, but a failed
+  // downstream write must not leave a validated orphan behind either.
+  async function cleanupPartialClosing(error: string) {
+    const { error: cleanupError } = await supabase
+      .from("closing_versions")
+      .delete()
+      .eq("id", closingId)
+      .eq("status", "validated");
+    return NextResponse.json({
+      error,
+      ...(cleanupError ? { cleanupError: "PARTIAL_CLOSING_CLEANUP_FAILED" } : {}),
+    }, { status: 400 });
+  }
 
   const codes = calculated.map((item) => item.code);
   const { data: definitions } = await supabase.from("kpi_definitions").select("id,code").in("code", codes);
@@ -232,7 +247,7 @@ export async function POST(request: Request) {
     })))
     .select("id,kpi_code");
   if (kpiError || !kpiRows) {
-    return NextResponse.json({ error: `KPI_WRITE_FAILED:${kpiError?.message ?? "UNKNOWN"}`, draftClosingId: closing.id }, { status: 400 });
+    return cleanupPartialClosing(`KPI_WRITE_FAILED:${kpiError?.message ?? "UNKNOWN"}`);
   }
 
   const resultByCode = new Map((kpiRows as KpiResult[]).map((item) => [item.kpi_code, item.id]));
@@ -256,13 +271,13 @@ export async function POST(request: Request) {
   if (lineageRows.length > 0) {
     const { error: lineageError } = await supabase.from("kpi_result_lineage").insert(lineageRows);
     if (lineageError) {
-      return NextResponse.json({ error: `LINEAGE_WRITE_FAILED:${lineageError.message}`, draftClosingId: closing.id }, { status: 400 });
+      return cleanupPartialClosing(`LINEAGE_WRITE_FAILED:${lineageError.message}`);
     }
   }
 
   const finalized = await supabase.rpc("finalize_manual_closing_publication", { p_closing_id: closing.id });
   if (finalized.error) {
-    return NextResponse.json({ error: `PUBLICATION_FINALIZE_FAILED:${finalized.error.message}`, draftClosingId: closing.id }, { status: 400 });
+    return cleanupPartialClosing(`PUBLICATION_FINALIZE_FAILED:${finalized.error.message}`);
   }
 
   const eventDetails = {

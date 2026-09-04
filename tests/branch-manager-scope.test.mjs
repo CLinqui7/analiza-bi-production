@@ -86,8 +86,8 @@ for (const requiredLocalAuthText of [
 }
 
 assert(
-  header.includes("fetchCurrentUserAccess") &&
-    header.includes("/api/context/options") &&
+  header.includes("/api/context/options") &&
+    header.includes("payload.actor") &&
     header.includes("isBranchManagerScopedAccess") &&
     header.includes("scopedCompanyAccess") &&
     header.includes("branchOptions") &&

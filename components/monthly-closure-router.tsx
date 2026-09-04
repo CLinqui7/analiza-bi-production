@@ -8,6 +8,7 @@ import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
 import { getBusinessLineForCompany } from "@/lib/tenant/demo-context";
 import { resolveV7ActorFromCurrent } from "@/lib/v7/server/api-auth";
 import { getTenantContextOptions } from "@/lib/v7/server/tenant-context";
+import type { BranchBiFilter } from "@/lib/v7/server/branch-bi-snapshot";
 import { canPerformAction as canPerformV7Action } from "@/lib/v7/security/authorization-policy";
 
 type DashboardMode =
@@ -22,6 +23,7 @@ type DashboardMode =
 
 type MonthlyClosureRouterProps = {
   actor: AuthorizationActor;
+  filter?: BranchBiFilter;
   line?: string | string[];
   mode: DashboardMode;
 };
@@ -86,6 +88,7 @@ function scopedCompanyUnit(actor: AuthorizationActor) {
 
 export async function MonthlyClosureRouter({
   actor,
+  filter,
   line,
   mode,
 }: MonthlyClosureRouterProps) {
@@ -100,7 +103,7 @@ export async function MonthlyClosureRouter({
           : mode === "results"
             ? "results"
             : "results";
-      return <BranchBiServerDashboard actor={actor} mode={dashboardMode} />;
+      return <BranchBiServerDashboard actor={actor} filter={filter} mode={dashboardMode} />;
     }
 
     if (actor.roleKey !== "gerente_sucursal") {

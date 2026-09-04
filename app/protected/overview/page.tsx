@@ -20,8 +20,8 @@ async function OverviewGate({ searchParams }: OverviewPageProps) {
 
   const actor = await requireProtectedPath("/protected/overview");
 
-  void searchParams;
-  return <BranchBiServerDashboard actor={actor} mode="home" />;
+  const params = searchParams ? await searchParams : {};
+  return <BranchBiServerDashboard actor={actor} filter={{ branchId: params.branch, countryId: params.country, businessLineId: params.line, periodStart: params.from, periodEnd: params.to }} mode="home" />;
 }
 
 export default function OverviewPage({ searchParams }: OverviewPageProps) {
