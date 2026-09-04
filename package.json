@@ -21,6 +21,7 @@
         "test:e2e:selenium": "node tests/e2e/selenium/run-all.mjs && node tests/e2e/selenium/authenticated-roles.mjs",
         "test:e2e:selenium:authenticated": "node tests/e2e/selenium/authenticated-roles.mjs",
         "test:e2e:selenium:production": "node tests/e2e/selenium/run-all.mjs",
+        "test:e2e:selenium:production-authenticated": "node scripts/run-authenticated-production-selenium.mjs",
         "release:gate": "node scripts/release-gate.mjs"
     },
     "dependencies": {

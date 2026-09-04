@@ -6,8 +6,10 @@ const steps = [
   ["typecheck", "npm", ["run", "typecheck"]],
   ["tests", "npm", ["run", "test"]],
   ["Supabase backend", "npm", ["run", "test:supabase-backend"]],
+  ["production directory integrity", "npm", ["run", "test:production-directory-integrity"]],
   ["build", "npm", ["run", "build"]],
   ["Selenium", "npm", ["run", "test:e2e:selenium"]],
+  ["authenticated production Selenium", "npm", ["run", "test:e2e:selenium:production-authenticated"]],
 ];
 
 for (const [name, command, args] of steps) {

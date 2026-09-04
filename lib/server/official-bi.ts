@@ -9,10 +9,12 @@ export type OfficialBusinessLineCode =
   | "IMAGING";
 
 export type OfficialDashboardFilter = {
+  areaId?: string;
   branchId?: string;
   businessLineId?: string;
   companyId?: string;
   countryId?: string;
+  managerId?: string;
   periodEnd?: string;
   periodStart?: string;
 };
@@ -115,14 +117,14 @@ function lineFilterMatches(
 }
 
 function sum(values: readonly (number | null)[]) {
-  const present = values.filter((value): value is number => value !== null);
+  const present = values.filter((value): value is number => value !== null && Number.isFinite(value));
   return present.length > 0
     ? present.reduce((total, value) => total + value, 0)
     : null;
 }
 
 function average(values: readonly (number | null)[]) {
-  const present = values.filter((value): value is number => value !== null);
+  const present = values.filter((value): value is number => value !== null && Number.isFinite(value));
   return present.length > 0
     ? present.reduce((total, value) => total + value, 0) / present.length
     : null;
@@ -152,15 +154,28 @@ function targetMetricKey(kpi: string) {
   return null;
 }
 
+/** Converts both date and month target representations to the one BI period grain. */
+function normalizedMonth(value: string | null | undefined) {
+  if (!value) return null;
+  const match = /^(\d{4})-(0[1-9]|1[0-2])(?:-\d{2})?$/.exec(value.trim());
+  return match ? `${match[1]}-${match[2]}` : null;
+}
+
+function targetPeriodMatches(row: TargetRow, filter: OfficialDashboardFilter) {
+  const targetMonth = normalizedMonth(text(row, "period_start", "period_month"));
+  if (!targetMonth) return false;
+  const fromMonth = normalizedMonth(filter.periodStart);
+  const toMonth = normalizedMonth(filter.periodEnd);
+  return (!fromMonth || targetMonth >= fromMonth) && (!toMonth || targetMonth <= toMonth);
+}
+
 function isApprovedTarget(row: TargetRow, filter: OfficialDashboardFilter) {
   const status = text(row, "status")?.toLowerCase();
   const approvedAt = text(row, "approved_at");
-  const period = text(row, "period_start", "period_month") ?? "";
   return row.is_demo !== true
     && (status === "active" || status === "approved")
     && Boolean(approvedAt || status === "approved")
-    && (!filter.periodStart || period >= filter.periodStart.slice(0, 7))
-    && (!filter.periodEnd || period <= filter.periodEnd.slice(0, 7));
+    && targetPeriodMatches(row, filter);
 }
 
 /**
@@ -177,10 +192,10 @@ export async function getOfficialExecutiveSnapshot(
     (record) =>
       (isWildcard(filter.countryId) || record.countryId === filter.countryId) &&
       (isWildcard(filter.companyId) || record.companyId === filter.companyId) &&
+      (isWildcard(filter.areaId) || record.operationalAreaId === filter.areaId) &&
       (isWildcard(filter.branchId) || record.branchId === filter.branchId) &&
-      lineFilterMatches(record, filter.businessLineId) &&
-      (!filter.periodStart ||
-        record.latestPeriod?.slice(0, 7) === filter.periodStart.slice(0, 7)),
+      (isWildcard(filter.managerId) || record.branchManagerId === filter.managerId || record.areaManagerId === filter.managerId) &&
+      lineFilterMatches(record, filter.businessLineId),
   );
   const publishedRecords = scopedRecords.filter(
     (record) => record.hasPublishedClosing,
@@ -192,8 +207,8 @@ export async function getOfficialExecutiveSnapshot(
       .sort()
       .at(-1) ?? null;
   const admin = getSupabaseAdminClient();
-  const targetResult = admin
-    ? await admin.from("kpi_targets").select("*").eq("organization_id", actor.scope.organizationId).in("branch_id", scopedRecords.map((record) => record.branchId))
+  const targetResult = admin && scopedRecords.length > 0
+    ? await admin.from("kpi_targets").select("*").eq("organization_id", actor.scope.organizationId).in("branch_id", Array.from(new Set(scopedRecords.map((record) => record.branchId))))
     : { data: [] as TargetRow[] };
   const targets = ((targetResult.data ?? []) as TargetRow[]).filter((target) => isApprovedTarget(target, filter));
   const targetComparisons = targets.flatMap<OfficialTargetComparison>((target) => {
@@ -208,7 +223,11 @@ export async function getOfficialExecutiveSnapshot(
     if (!record || !officialLine || targetValue === null) return [];
     const actualValue = key ? record.metrics[key]?.value ?? null : null;
     const direction = text(target, "direction") ?? "HIGHER_IS_BETTER";
-    const compliance = actualValue === null ? null : direction === "LOWER_IS_BETTER" ? targetValue / Math.max(actualValue, Number.EPSILON) : actualValue / Math.max(targetValue, Number.EPSILON);
+    const compliance = actualValue === null || !Number.isFinite(actualValue) || targetValue <= 0
+      ? null
+      : direction === "LOWER_IS_BETTER"
+        ? actualValue > 0 ? targetValue / actualValue : null
+        : actualValue / targetValue;
     return [{
       actualValue,
       branchName: record.branchName,
@@ -217,7 +236,7 @@ export async function getOfficialExecutiveSnapshot(
       kpiId,
       kpiLabel: text(target, "kpi_name", "label") ?? kpiId,
       lineName: lineNames[officialLine],
-      period: (text(target, "period_start", "period_month") ?? record.latestPeriod ?? "").slice(0, 7),
+      period: normalizedMonth(text(target, "period_start", "period_month")) ?? normalizedMonth(record.latestPeriod) ?? "Sin periodo",
       status: compliance === null ? "sin_resultado" : compliance >= 1 ? "cumplido" : compliance >= 0.9 ? "vigilar" : "critico",
       targetValue,
       unit: text(target, "unit") === "ratio" ? "ratio" : text(target, "unit") === "count" ? "count" : "currency",

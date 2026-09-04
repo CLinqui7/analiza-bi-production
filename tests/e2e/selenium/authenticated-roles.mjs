@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { Builder, By, until } from "selenium-webdriver";
@@ -13,7 +14,7 @@ const baseUrl = (process.env.QA_BASE_URL ?? "http://127.0.0.1:3000").replace(
 const artifacts = resolve("artifacts/selenium/authenticated-roles");
 await mkdir(artifacts, { recursive: true });
 
-const env = Object.fromEntries(
+const fileEnv = Object.fromEntries(
   (await readFile(".env.local", "utf8"))
     .split(/\r?\n/)
     .filter((line) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(line))
@@ -22,6 +23,22 @@ const env = Object.fromEntries(
       return [line.slice(0, separator), line.slice(separator + 1)];
     }),
 );
+function netlifyEnvironmentValue(name) {
+  try {
+    return execFileSync(
+      process.platform === "win32" ? "npx.cmd" : "npx",
+      ["--yes", "netlify-cli@latest", "env:get", name],
+      { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] },
+    ).trim();
+  } catch {
+    return "";
+  }
+}
+const env = {
+  ...fileEnv,
+  NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL ?? fileEnv.NEXT_PUBLIC_SUPABASE_URL ?? netlifyEnvironmentValue("NEXT_PUBLIC_SUPABASE_URL"),
+  SUPABASE_SERVICE_ROLE_KEY: process.env.SUPABASE_SERVICE_ROLE_KEY ?? fileEnv.SUPABASE_SERVICE_ROLE_KEY ?? netlifyEnvironmentValue("SUPABASE_SERVICE_ROLE_KEY"),
+};
 assert.ok(
   env.NEXT_PUBLIC_SUPABASE_URL && env.SUPABASE_SERVICE_ROLE_KEY,
   "Authenticated Selenium requires local server-only Supabase credentials.",
@@ -37,7 +54,8 @@ const emails = {
   ceo: `ceo-${run}@qa.invalid`,
   ga: `ga-${run}@qa.invalid`,
   go: `go-${run}@qa.invalid`,
-  gs: `gs-${run}@qa.invalid`,
+  gsA: `gs-a-${run}@qa.invalid`,
+  gsB: `gs-b-${run}@qa.invalid`,
 };
 const userIds = [];
 let organizationId;
@@ -65,6 +83,7 @@ async function cleanupQaOrganization(id) {
   await remove("manual_monthly_submissions");
   // Published QA submissions create official closings. Delete the root closing
   // rows before their scoped branch; dependent KPI and lineage rows cascade.
+  await remove("kpi_targets");
   await remove("closing_versions");
   for (const table of ["audit_logs", "reporting_lines", "directory_assignment_slots", "branch_managers", "manager_assignments", "user_roles", "profiles", "branches", "operational_areas", "business_lines", "companies", "countries"]) {
     await remove(table);
@@ -165,6 +184,42 @@ async function waitForDashboard(title) {
   assert.match(await bodyText(), new RegExp(title));
 }
 
+async function setGlobalPeriod(from, to) {
+  const fromInput = await driver.wait(until.elementLocated(By.css('input[aria-label="Fecha desde"]')), 10_000);
+  const toInput = await driver.wait(until.elementLocated(By.css('input[aria-label="Fecha hasta"]')), 10_000);
+  await driver.executeScript(
+    `const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+     for (const [input, value] of [[arguments[0], arguments[2]], [arguments[1], arguments[3]]]) {
+       set.call(input, value);
+       input.dispatchEvent(new Event('input', { bubbles: true }));
+       input.dispatchEvent(new Event('change', { bubbles: true }));
+     }`,
+    fromInput,
+    toInput,
+    from,
+    to,
+  );
+}
+
+async function openGlobalFilters() {
+  const visibleDateInputs = await driver.findElements(By.css('input[aria-label="Fecha desde"]'));
+  if (visibleDateInputs.length === 0) {
+    await driver.findElement(By.xpath("//button[contains(., 'Periodo') or contains(., 'Filtros')]")).click();
+  }
+  await driver.wait(until.elementLocated(By.css('input[aria-label="Fecha desde"]')), 15_000);
+}
+
+async function waitForGlobalScope(queryPart) {
+  try {
+    await driver.wait(
+      async () => (await driver.getCurrentUrl()).includes(queryPart),
+      30_000,
+    );
+  } catch {
+    throw new Error(`Global filter was not applied: expected ${queryPart}; current ${(await driver.getCurrentUrl())}`);
+  }
+}
+
 async function expectNavigation({
   managerBonuses,
   roleKey,
@@ -251,6 +306,18 @@ try {
     .select("id")
     .single();
   fail(line.error, "QA business-line creation");
+  const laboratoryLine = await admin
+    .from("business_lines")
+    .insert({
+      code: "LABORATORY",
+      company_id: company.data.id,
+      is_demo: false,
+      name: "Laboratorio QA",
+      organization_id: organizationId,
+    })
+    .select("id")
+    .single();
+  fail(laboratoryLine.error, "QA second business-line creation");
   const area = await admin
     .from("operational_areas")
     .insert({
@@ -294,8 +361,8 @@ try {
     .order("name");
   fail(branches.error, "QA branch creation");
   assert.equal(branches.data.length, 2, "QA requires two real branch records");
-  const [branchA] = branches.data;
-  const [ceoId, gaId, goId, gsId] = await Promise.all(
+  const [branchA, branchB] = branches.data;
+  const [ceoId, gaId, goId, gsAId, gsBId] = await Promise.all(
     Object.values(emails).map((email) => createUser(email)),
   );
   const profiles = await admin.from("profiles").upsert([
@@ -333,9 +400,19 @@ try {
       default_branch_id: branchA.id,
       default_company_id: company.data.id,
       default_country_id: country.data.id,
-      display_name: "GS QA",
-      email: emails.gs,
-      id: gsId,
+      display_name: "GS QA A",
+      email: emails.gsA,
+      id: gsAId,
+      organization_id: organizationId,
+      status: "active",
+    },
+    {
+      default_branch_id: branchB.id,
+      default_company_id: company.data.id,
+      default_country_id: country.data.id,
+      display_name: "GS QA B",
+      email: emails.gsB,
+      id: gsBId,
       organization_id: organizationId,
       status: "active",
     },
@@ -387,7 +464,19 @@ try {
       organization_id: organizationId,
       role_id: roleId.gerente_sucursal,
       status: "active",
-      user_id: gsId,
+      user_id: gsAId,
+    },
+    {
+      branch_id: branchB.id,
+      business_line_code: "PHYSIOTHERAPY",
+      business_line_id: line.data.id,
+      company_id: company.data.id,
+      country_id: country.data.id,
+      operational_area_id: area.data.id,
+      organization_id: organizationId,
+      role_id: roleId.gerente_sucursal,
+      status: "active",
+      user_id: gsBId,
     },
   ]);
   fail(grants.error, "QA scoped role grants");
@@ -402,13 +491,96 @@ try {
   );
   const branchManager = await admin.from("branch_managers").insert({
     branch_id: branchA.id,
-    display_name: "GS QA",
-    email: emails.gs,
+    display_name: "GS QA A",
+    email: emails.gsA,
     is_demo: false,
     organization_id: organizationId,
-    profile_id: gsId,
+    profile_id: gsAId,
   });
   fail(branchManager.error, "QA branch manager assignment");
+  const branchManagerB = await admin.from("branch_managers").insert({
+    branch_id: branchB.id,
+    display_name: "GS QA B",
+    email: emails.gsB,
+    is_demo: false,
+    organization_id: organizationId,
+    profile_id: gsBId,
+  });
+  fail(branchManagerB.error, "QA second branch manager assignment");
+
+  const closingFixtures = [
+    { branch: branchA, line: line.data.id, period: "2026-07", revenue: 1100, volume: 11 },
+    { branch: branchA, line: line.data.id, period: "2026-08", revenue: 2100, volume: 21 },
+    { branch: branchB, line: line.data.id, period: "2026-07", revenue: 3100, volume: 31 },
+    { branch: branchB, line: line.data.id, period: "2026-08", revenue: 4100, volume: 41 },
+    { branch: branchA, line: laboratoryLine.data.id, period: "2026-07", revenue: 5100, volume: 51 },
+    { branch: branchA, line: laboratoryLine.data.id, period: "2026-08", revenue: 6100, volume: 61 },
+  ];
+  for (const fixture of closingFixtures) {
+    const [year, month] = fixture.period.split("-");
+    const lastDay = month === "02" ? "28" : month === "07" ? "31" : "31";
+    const closing = await admin.from("closing_versions").insert({
+      branch_id: fixture.branch.id,
+      business_line_id: fixture.line,
+      company_id: company.data.id,
+      country_id: country.data.id,
+      is_demo: false,
+      operational_area_id: area.data.id,
+      organization_id: organizationId,
+      period_end: `${year}-${month}-${lastDay}`,
+      period_start: `${year}-${month}-01`,
+      published_at: "2026-09-01T00:00:00.000Z",
+      quality_score: 95,
+      source_kind: "manual",
+      status: "published",
+      version_number: 1,
+    }).select("id").single();
+    fail(closing.error, `QA ${fixture.period} closing fixture`);
+    const kpis = await admin.from("closing_kpi_results").insert([
+      {
+        category: "commercial",
+        closing_version_id: closing.data.id,
+        data_status: "CALCULATED",
+        formula_version: "qa-fixture-v1",
+        is_demo: false,
+        kpi_code: "revenue_qa",
+        kpi_name: "Ingresos QA",
+        unit: "currency",
+        value: fixture.revenue,
+      },
+      {
+        category: "operational",
+        closing_version_id: closing.data.id,
+        data_status: "CALCULATED",
+        formula_version: "qa-fixture-v1",
+        is_demo: false,
+        kpi_code: "volume_qa",
+        kpi_name: "Volumen QA",
+        unit: "count",
+        value: fixture.volume,
+      },
+    ]);
+    fail(kpis.error, `QA ${fixture.period} KPI fixture`);
+  }
+  const target = await admin.from("kpi_targets").insert({
+    approved_at: "2026-08-01T00:00:00.000Z",
+    branch_id: branchA.id,
+    business_line_id: line.data.id,
+    business_line: "PHYSIOTHERAPY",
+    company_id: company.data.id,
+    country_id: country.data.id,
+    direction: "HIGHER_IS_BETTER",
+    is_demo: false,
+    kpi_code: "revenue_qa",
+    kpi_name: "Ingresos QA",
+    operational_area_id: area.data.id,
+    organization_id: organizationId,
+    period_start: "2026-08-01",
+    status: "approved",
+    target_value: 2000,
+    unit: "currency",
+  });
+  fail(target.error, "QA approved KPI target fixture");
 
   const options = new chrome.Options().addArguments(
     "--headless=new",
@@ -462,11 +634,6 @@ try {
     "GO country must be fixed instead of selectable",
   );
   await driver.findElement(By.xpath("//button[contains(., 'Periodo') or contains(., 'Filtros')]")).click();
-  assert.equal(
-    (await driver.findElements(By.css('select[aria-label="Gerente"]'))).length,
-    0,
-    "A one-option manager filter must stay hidden; the global header owns all visible filters.",
-  );
   const insideCreation = await request(
     "/api/branches",
   );
@@ -528,28 +695,67 @@ try {
     0,
     "GA single area must not render a selector",
   );
-  await driver.findElement(By.xpath("//button[contains(., 'Periodo') or contains(., 'Filtros')]")).click();
-  const branchFilter = await driver.wait(until.elementLocated(By.css('select[aria-label="Sucursal"]')), 10_000);
-  await branchFilter.sendKeys("Sucursal QA B");
-  const apply = await driver.findElement(By.xpath("//button[normalize-space(.)='Aplicar filtros']"));
-  const filterApplyStartedAt = Date.now();
-  await apply.click();
-  timings.filterApplyMs = Date.now() - filterApplyStartedAt;
-  await driver.wait(
-    async () => (await driver.getCurrentUrl()).includes("branch="),
-    10_000,
-  );
-  const requestCounts = await driver.executeScript(
+  const initialRequestCounts = await driver.executeScript(
     "return performance.getEntriesByType('resource').map((entry) => entry.name).filter((name) => name.includes('/api/context/options') || name.includes('/api/auth/session')).reduce((counts, name) => ({ ...counts, [name]: (counts[name] ?? 0) + 1 }), {});",
   );
   assert.ok(
-    Object.values(requestCounts).every((count) => Number(count) <= 1),
+    Object.values(initialRequestCounts).every((count) => Number(count) <= 1),
     "The initial context requests must not be duplicated.",
   );
+  const gaContextOptions = await request("/api/context/options");
+  assert.ok(
+    gaContextOptions.options.managers.some((manager) => manager.id === gsAId)
+      && gaContextOptions.options.managers.some((manager) => manager.id === gsBId),
+    "GA context must expose both GS UUIDs from the authoritative header source.",
+  );
+  await openGlobalFilters();
+  await capture("ga-global-filters");
+  const managerFilter = await driver.wait(until.elementLocated(By.css('select[aria-label="Gerente"]')), 10_000);
+  const managerOptionValues = await managerFilter.findElements(By.css("option"));
+  const managerIds = await Promise.all(managerOptionValues.map((option) => option.getAttribute("value")));
+  assert.ok(managerIds.includes(gsAId) && managerIds.includes(gsBId), "Manager options must use the actual GS UUID values.");
+  await setGlobalPeriod("2026-07-01", "2026-07-31");
+  let apply = await driver.findElement(By.xpath("//button[normalize-space(.)='Aplicar filtros']"));
+  const filterApplyStartedAt = Date.now();
+  await apply.click();
+  timings.filterApplyMs = Date.now() - filterApplyStartedAt;
+  await waitForGlobalScope("from=2026-07-01");
+  assert.match(await bodyText(), /\$4,200/, "July must load only the July BI dataset after one Apply.");
+  await openGlobalFilters();
+  await setGlobalPeriod("2026-08-01", "2026-08-31");
+  apply = await driver.findElement(By.xpath("//button[normalize-space(.)='Aplicar filtros']"));
+  await apply.click();
+  await waitForGlobalScope("from=2026-08-01");
+  assert.match(await bodyText(), /\$6,200/, "August must replace July with the August BI dataset after one Apply.");
+  await openGlobalFilters();
+  const managerA = await driver.wait(until.elementLocated(By.css('select[aria-label="Gerente"]')), 10_000);
+  await managerA.sendKeys("GS QA A");
+  assert.equal(await driver.executeScript("return arguments[0].value;", managerA), gsAId, "Selecting GS A must submit its UUID, never its display name.");
+  apply = await driver.findElement(By.xpath("//button[normalize-space(.)='Aplicar filtros']"));
+  await apply.click();
+  await waitForGlobalScope(`manager=${gsAId}`);
+  const managerAResults = await driver.findElement(By.css("[data-testid=bi-results-aggregate]")).getText();
+  assert.match(managerAResults, /Sucursal QA A/, "GS A filter must retain only GS A records.");
+  assert.doesNotMatch(managerAResults, /Sucursal QA B/, "GS A filter must exclude GS B records.");
+  await openGlobalFilters();
+  const managerB = await driver.wait(until.elementLocated(By.css('select[aria-label="Gerente"]')), 10_000);
+  await managerB.sendKeys("GS QA B");
+  assert.equal(await driver.executeScript("return arguments[0].value;", managerB), gsBId, "Selecting GS B must submit its UUID, never its display name.");
+  apply = await driver.findElement(By.xpath("//button[normalize-space(.)='Aplicar filtros']"));
+  await apply.click();
+  await waitForGlobalScope(`manager=${gsBId}`);
+  const managerBResults = await driver.findElement(By.css("[data-testid=bi-results-aggregate]")).getText();
+  assert.match(managerBResults, /Sucursal QA B/, "GS B filter must switch the BI scope to GS B records.");
+  assert.doesNotMatch(managerBResults, /Sucursal QA A/, "GS B filter must exclude GS A records.");
   assert.equal((await driver.findElements(By.css("[data-testid=bi-results-aggregate]"))).length, 1, "Resultados must use the aggregate view, not the branch ranking.");
-  await driver.get(`${baseUrl}/protected/sucursales?branch=${branchA.id}&line=${line.data.id}`);
+  await driver.get(`${baseUrl}/protected/sucursales?from=2026-08-01&to=2026-08-31`);
   await waitForDashboard("Sucursales");
   assert.equal((await driver.findElements(By.css("[data-testid=bi-branches-ranking]"))).length, 1, "Sucursales must use the ranking/heatmap view.");
+  const branchLineText = await bodyText();
+  assert.match(branchLineText, /Sucursal QA A\s+Fisioterapia/, "A branch + physiotherapy line must be its own BI unit.");
+  assert.match(branchLineText, /Sucursal QA A\s+Laboratorio QA/, "The same branch + laboratory line must be a distinct BI unit.");
+  assert.match(branchLineText, /\$2,100/, "Physiotherapy KPI must remain separate from the laboratory KPI.");
+  assert.match(branchLineText, /\$6,100/, "Laboratory KPI must remain separate from the physiotherapy KPI.");
   await request("/api/branches");
   const gaManagers = await request("/api/users/branch-managers");
   assert.ok(
@@ -578,12 +784,17 @@ try {
   await assertForbidden("/protected/usuarios-permisos");
   await driver.get(`${baseUrl}/protected/cierres`);
   await waitForDashboard("Historial de cierres");
-  await driver.get(`${baseUrl}/protected/metas`);
-  assert.doesNotMatch(await bodyText(), /configuration_error|backend anterior/i);
-  assert.match(await bodyText(), /Sin cierres publicados|Sin meta aprobada/);
+  await driver.get(`${baseUrl}/protected/metas?branch=${branchA.id}&line=${line.data.id}&from=2026-08-01&to=2026-08-31`);
+  const targetsText = await bodyText();
+  assert.doesNotMatch(targetsText, /configuration_error|backend anterior/i);
+  assert.match(targetsText, /Metas aprobadas vs resultados/, "Metas must load the approved QA target.");
+  assert.match(targetsText, /\$2,100/, "Metas must show the published actual KPI.");
+  assert.match(targetsText, /\$2,000/, "Metas must show the approved target value.");
+  assert.match(targetsText, /105%/, "Metas must calculate compliance from the real actual and target.");
+  assert.match(targetsText, /Cumplido/, "Metas must expose the derived target state.");
   await capture("ga");
 
-  await login(emails.gs);
+  await login(emails.gsA);
   await expectNavigation({
     managerBonuses: false,
     roleHome: false,

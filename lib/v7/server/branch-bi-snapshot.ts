@@ -57,6 +57,7 @@ export type BranchBiFilter = {
   areaId?: string;
   branchId?: string;
   businessLineId?: string;
+  companyId?: string;
   countryId?: string;
   managerId?: string;
   periodEnd?: string;
@@ -155,6 +156,11 @@ function asFiniteNumber(value: number | string | null) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** Header-wide "all" options are URL sentinels, never database identifiers. */
+function hasScopedFilter(value: string | undefined) {
+  return Boolean(value && !value.startsWith("__"));
+}
+
 function periodFor(version: ClosingVersionRow) {
   return version.period_end ?? version.period_start ?? version.published_at ?? "";
 }
@@ -247,7 +253,12 @@ async function getBranchBiSnapshotUncached(
       companyId: version.company_id,
       countryId: version.country_id,
       operationalAreaId: version.operational_area_id,
-    }),
+    })
+    && (!hasScopedFilter(filter.countryId) || version.country_id === filter.countryId)
+    && (!hasScopedFilter(filter.companyId) || version.company_id === filter.companyId)
+    && (!hasScopedFilter(filter.areaId) || version.operational_area_id === filter.areaId)
+    && (!hasScopedFilter(filter.branchId) || version.branch_id === filter.branchId)
+    && (!hasScopedFilter(filter.businessLineId) || version.business_line_id === filter.businessLineId),
   );
   const versionIds = versions.map((version) => version.id);
   const [kpisResult, insightsResult, submissionsResult] = await Promise.all([
@@ -288,16 +299,26 @@ async function getBranchBiSnapshotUncached(
     context.areaManagers.map((manager) => [manager.operationalAreaId, manager]),
   );
   const linesById = new Map(context.businessLines.map((line) => [line.id, line]));
-  const manualSubmissions = ((submissionsResult.data ?? []) as ManualSubmissionRow[]).filter((submission) =>
-    actorCanSee(v7Actor, {
+  const manualSubmissions = ((submissionsResult.data ?? []) as ManualSubmissionRow[]).filter((submission) => {
+    const branchManager = branchManagersByBranchId.get(submission.branch_id);
+    const areaManager = submission.operational_area_id
+      ? areaManagersByAreaId.get(submission.operational_area_id)
+      : null;
+    return actorCanSee(v7Actor, {
       organizationId: actor.scope.organizationId,
       branchId: submission.branch_id,
       businessLineId: submission.business_line_id,
       companyId: submission.company_id,
       countryId: submission.country_id,
       operationalAreaId: submission.operational_area_id,
-    }),
-  );
+    })
+      && (!hasScopedFilter(filter.countryId) || submission.country_id === filter.countryId)
+      && (!hasScopedFilter(filter.companyId) || submission.company_id === filter.companyId)
+      && (!hasScopedFilter(filter.areaId) || submission.operational_area_id === filter.areaId)
+      && (!hasScopedFilter(filter.branchId) || submission.branch_id === filter.branchId)
+      && (!hasScopedFilter(filter.businessLineId) || submission.business_line_id === filter.businessLineId)
+      && (!hasScopedFilter(filter.managerId) || branchManager?.id === filter.managerId || areaManager?.id === filter.managerId);
+  });
   const historyVersionsResult = manualSubmissions.length > 0
     ? await admin
       .from("manual_monthly_submission_versions")
@@ -436,15 +457,18 @@ async function getBranchBiSnapshotUncached(
       return [record];
     })
     .filter((record) =>
-      (!filter.countryId || record.countryId === filter.countryId)
-      && (!filter.businessLineId || record.businessLineId === filter.businessLineId)
-      && (!filter.areaId || record.operationalAreaId === filter.areaId)
-      && (!filter.branchId || record.branchId === filter.branchId)
-      && (!filter.managerId || record.branchManagerId === filter.managerId || record.areaManagerId === filter.managerId),
+      (!hasScopedFilter(filter.countryId) || record.countryId === filter.countryId)
+      && (!hasScopedFilter(filter.companyId) || record.companyId === filter.companyId)
+      && (!hasScopedFilter(filter.businessLineId) || record.businessLineId === filter.businessLineId)
+      && (!hasScopedFilter(filter.areaId) || record.operationalAreaId === filter.areaId)
+      && (!hasScopedFilter(filter.branchId) || record.branchId === filter.branchId)
+      && (!hasScopedFilter(filter.managerId) || record.branchManagerId === filter.managerId || record.areaManagerId === filter.managerId),
     )
     .sort((left, right) => left.branchName.localeCompare(right.branchName, "es"));
   const namesByBranchId = new Map(records.map((record) => [record.branchId, record.branchName]));
-  const insights = ((insightsResult.data ?? []) as InsightRow[]).map((insight) => ({
+  const insights = ((insightsResult.data ?? []) as InsightRow[])
+    .filter((insight) => !insight.branch_id || namesByBranchId.has(insight.branch_id))
+    .map((insight) => ({
     branchId: insight.branch_id,
     branchName: insight.branch_id ? namesByBranchId.get(insight.branch_id) ?? null : null,
     message: insight.summary,

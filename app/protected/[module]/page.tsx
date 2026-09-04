@@ -70,10 +70,12 @@ async function renderOfficialDataModule(
 ) {
   const params = searchParams ? await searchParams : {};
   const snapshot = await getOfficialExecutiveSnapshot(actor, {
+    areaId: params.area,
     branchId: params.branch,
     businessLineId: params.line,
     companyId: params.company,
     countryId: params.country,
+    managerId: params.manager,
     periodEnd: params.to,
     periodStart: params.from,
   });
@@ -113,7 +115,7 @@ export default async function ModulePage({
 
   if (module === "sucursales") {
     const context = searchParams ? await searchParams : {};
-    return <BranchBiServerDashboard actor={actor} filter={{ areaId: context.area, branchId: context.branch, businessLineId: context.line, countryId: context.country, managerId: context.manager, periodStart: context.from, periodEnd: context.to }} mode="branches" />;
+    return <BranchBiServerDashboard actor={actor} filter={{ areaId: context.area, branchId: context.branch, businessLineId: context.line, companyId: context.company, countryId: context.country, managerId: context.manager, periodStart: context.from, periodEnd: context.to }} mode="branches" />;
   }
 
   if (module === "profesionales") {
@@ -176,10 +178,12 @@ export default async function ModulePage({
     if (!isDemoRuntimeEnvironment()) {
       const params = searchParams ? await searchParams : {};
       const snapshot = await getOfficialExecutiveSnapshot(actor, {
+        areaId: params.area,
         branchId: params.branch,
         businessLineId: params.line,
         companyId: params.company,
         countryId: params.country,
+        managerId: params.manager,
         periodEnd: params.to,
         periodStart: params.from,
       });

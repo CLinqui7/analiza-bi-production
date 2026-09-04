@@ -6,11 +6,13 @@ import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard
 
 type OverviewPageProps = {
   searchParams?: Promise<{
+    area?: string;
     branch?: string;
     company?: string;
     country?: string;
     from?: string;
     line?: string;
+    manager?: string;
     to?: string;
   }>;
 };
@@ -21,7 +23,7 @@ async function OverviewGate({ searchParams }: OverviewPageProps) {
   const actor = await requireProtectedPath("/protected/overview");
 
   const params = searchParams ? await searchParams : {};
-  return <BranchBiServerDashboard actor={actor} filter={{ branchId: params.branch, countryId: params.country, businessLineId: params.line, periodStart: params.from, periodEnd: params.to }} mode="home" />;
+  return <BranchBiServerDashboard actor={actor} filter={{ areaId: params.area, branchId: params.branch, businessLineId: params.line, companyId: params.company, countryId: params.country, managerId: params.manager, periodStart: params.from, periodEnd: params.to }} mode="home" />;
 }
 
 export default function OverviewPage({ searchParams }: OverviewPageProps) {

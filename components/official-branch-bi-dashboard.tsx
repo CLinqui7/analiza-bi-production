@@ -24,11 +24,11 @@ type DashboardMode = "branch" | "branches" | "home" | "history" | "results";
 type SortKey = "branch" | "quality" | "revenue" | "score";
 
 function metricValue(metric: BranchBiMetric | undefined) {
-  return metric?.value ?? null;
+  return metric && Number.isFinite(metric.value) ? metric.value : null;
 }
 
 function formatMetric(metric: BranchBiMetric | undefined) {
-  if (!metric) return "Sin dato";
+  if (!metric || !Number.isFinite(metric.value)) return "Sin dato";
   if (metric.unit === "currency") {
     return new Intl.NumberFormat("en-US", {
       currency: "USD",
@@ -44,7 +44,7 @@ function formatMetric(metric: BranchBiMetric | undefined) {
 }
 
 function formatNumber(value: number | null, suffix = "") {
-  return value === null
+  return value === null || !Number.isFinite(value)
     ? "Sin dato"
     : `${new Intl.NumberFormat("es-SV", { maximumFractionDigits: 1 }).format(value)}${suffix}`;
 }
@@ -53,14 +53,19 @@ function sumCurrency(records: readonly BranchBiRecord[]) {
   const countries = new Set(records.map((record) => record.countryId).filter(Boolean));
   const values = records
     .map((record) => metricValue(record.metrics.revenue))
-    .filter((value): value is number => value !== null);
+    .filter((value): value is number => value !== null && Number.isFinite(value));
   if (countries.size !== 1 || values.length === 0) return null;
   return values.reduce((sum, value) => sum + value, 0);
 }
 
 function average(records: readonly BranchBiRecord[], select: (record: BranchBiRecord) => number | null) {
-  const values = records.map(select).filter((value): value is number => value !== null);
+  const values = records.map(select).filter((value): value is number => value !== null && Number.isFinite(value));
   return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+function sumNumbers(values: readonly (number | null)[]) {
+  const calculable = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  return calculable.length > 0 ? calculable.reduce((total, value) => total + value, 0) : null;
 }
 
 function status(record: BranchBiRecord) {
@@ -89,8 +94,8 @@ function TrendChart({ records }: { records: readonly BranchBiRecord[] }) {
     .map((record) => ({
       name: record.branchName,
       points: record.trend
-        .map((point) => ({ label: point.period, value: point.revenue?.value ?? null }))
-        .filter((point): point is { label: string; value: number } => point.value !== null),
+        .map((point) => ({ label: point.period, value: metricValue(point.revenue ?? undefined) }))
+        .filter((point): point is { label: string; value: number } => point.value !== null && Number.isFinite(point.value)),
     }))
     .filter((line) => line.points.length >= 2)
     .slice(0, 5);
@@ -132,7 +137,7 @@ function Matrix({ records }: { records: readonly BranchBiRecord[] }) {
       name: record.branchName,
       revenue: metricValue(record.metrics.revenue),
     }))
-    .filter((point): point is { margin: number; name: string; revenue: number } => point.margin !== null && point.revenue !== null);
+    .filter((point): point is { margin: number; name: string; revenue: number } => point.margin !== null && point.revenue !== null && Number.isFinite(point.margin) && Number.isFinite(point.revenue));
   if (points.length === 0) {
     return <p className="text-sm text-muted-foreground">Sin pares reales de facturación y margen para graficar.</p>;
   }
@@ -162,7 +167,7 @@ function ResultsDashboard({ snapshot }: { snapshot: BranchBiSnapshot }) {
   const records = snapshot.records;
   const revenue = sumCurrency(records);
   const margin = average(records, (record) => metricValue(record.metrics.margin));
-  const volume = records.reduce((total, record) => total + (metricValue(record.metrics.volume) ?? 0), 0);
+  const volume = sumNumbers(records.map((record) => metricValue(record.metrics.volume)));
   const occupancy = average(records, (record) => metricValue(record.metrics.occupancy));
   const sla = average(records, (record) => metricValue(record.metrics.sla));
   return <section className="flex w-full min-w-0 flex-col gap-5 px-4 py-6 lg:px-6" data-testid="official-branch-bi">

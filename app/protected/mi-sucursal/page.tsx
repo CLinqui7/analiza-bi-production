@@ -8,6 +8,7 @@ type MyBranchPageProps = {
   searchParams?: Promise<{
     area?: string;
     branch?: string;
+    company?: string;
     country?: string;
     from?: string;
     line?: string | string[];
@@ -27,7 +28,7 @@ async function MyBranchGate({
   const actor = await requireProtectedPath("/protected/mi-sucursal");
 
   return (
-    <MonthlyClosureRouter actor={actor} filter={{ areaId: params.area, branchId: params.branch, countryId: params.country, businessLineId: Array.isArray(params.line) ? params.line[0] : params.line, managerId: params.manager, periodStart: params.from, periodEnd: params.to }} line={params.line} mode="branch-home" />
+    <MonthlyClosureRouter actor={actor} filter={{ areaId: params.area, branchId: params.branch, businessLineId: Array.isArray(params.line) ? params.line[0] : params.line, companyId: params.company, countryId: params.country, managerId: params.manager, periodStart: params.from, periodEnd: params.to }} line={params.line} mode="branch-home" />
   );
 }
 

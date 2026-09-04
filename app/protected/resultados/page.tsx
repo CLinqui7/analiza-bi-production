@@ -8,6 +8,7 @@ type ResultsPageProps = {
   searchParams?: Promise<{
     area?: string;
     branch?: string;
+    company?: string;
     country?: string;
     from?: string;
     line?: string | string[];
@@ -26,7 +27,7 @@ async function ResultsGate({
   const params = searchParams ? await searchParams : {};
   const actor = await requireProtectedPath("/protected/resultados");
 
-  return <MonthlyClosureRouter actor={actor} filter={{ areaId: params.area, branchId: params.branch, countryId: params.country, businessLineId: Array.isArray(params.line) ? params.line[0] : params.line, managerId: params.manager, periodStart: params.from, periodEnd: params.to }} line={params.line} mode="results" />;
+  return <MonthlyClosureRouter actor={actor} filter={{ areaId: params.area, branchId: params.branch, businessLineId: Array.isArray(params.line) ? params.line[0] : params.line, companyId: params.company, countryId: params.country, managerId: params.manager, periodStart: params.from, periodEnd: params.to }} line={params.line} mode="results" />;
 }
 
 export default function ResultsPage({ searchParams }: ResultsPageProps) {
