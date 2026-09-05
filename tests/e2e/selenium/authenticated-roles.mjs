@@ -53,6 +53,7 @@ const password = `${randomBytes(24).toString("base64url")}Aa1!`;
 const emails = {
   ceo: `ceo-${run}@qa.invalid`,
   ga: `ga-${run}@qa.invalid`,
+  gaPeer: `ga-peer-${run}@qa.invalid`,
   go: `go-${run}@qa.invalid`,
   gsA: `gs-a-${run}@qa.invalid`,
   gsB: `gs-b-${run}@qa.invalid`,
@@ -331,6 +332,19 @@ try {
     .select("id")
     .single();
   fail(area.error, "QA area creation");
+  const peerArea = await admin
+    .from("operational_areas")
+    .insert({
+      code: `QA-${run}-PEER`,
+      company_id: company.data.id,
+      country_id: country.data.id,
+      name: "Área QA par",
+      organization_id: organizationId,
+      status: "active",
+    })
+    .select("id")
+    .single();
+  fail(peerArea.error, "QA peer area creation");
   const branches = await admin
     .from("branches")
     .insert([
@@ -362,7 +376,7 @@ try {
   fail(branches.error, "QA branch creation");
   assert.equal(branches.data.length, 2, "QA requires two real branch records");
   const [branchA, branchB] = branches.data;
-  const [ceoId, gaId, goId, gsAId, gsBId] = await Promise.all(
+  const [ceoId, gaId, gaPeerId, goId, gsAId, gsBId] = await Promise.all(
     Object.values(emails).map((email) => createUser(email)),
   );
   const profiles = await admin.from("profiles").upsert([
@@ -393,6 +407,16 @@ try {
       display_name: "GA QA",
       email: emails.ga,
       id: gaId,
+      organization_id: organizationId,
+      status: "active",
+    },
+    {
+      default_branch_id: branchA.id,
+      default_company_id: company.data.id,
+      default_country_id: country.data.id,
+      display_name: "GA QA par",
+      email: emails.gaPeer,
+      id: gaPeerId,
       organization_id: organizationId,
       status: "active",
     },
@@ -455,6 +479,15 @@ try {
       user_id: gaId,
     },
     {
+      company_id: company.data.id,
+      country_id: country.data.id,
+      operational_area_id: peerArea.data.id,
+      organization_id: organizationId,
+      role_id: roleId.gerente_area,
+      status: "active",
+      user_id: gaPeerId,
+    },
+    {
       branch_id: branchA.id,
       business_line_code: "PHYSIOTHERAPY",
       business_line_id: line.data.id,
@@ -488,6 +521,15 @@ try {
         .eq("id", area.data.id)
     ).error,
     "QA area manager assignment",
+  );
+  fail(
+    (
+      await admin
+        .from("operational_areas")
+        .update({ manager_profile_id: gaPeerId })
+        .eq("id", peerArea.data.id)
+    ).error,
+    "QA peer area manager assignment",
   );
   const branchManager = await admin.from("branch_managers").insert({
     branch_id: branchA.id,
@@ -610,7 +652,18 @@ try {
     (await driver.findElements(By.css("[data-testid=official-branch-bi] tbody tr"))).length >= 2,
     "CEO ranking must render every authorized branch",
   );
-  await request("/api/context/options");
+  const ceoContextOptions = await request("/api/context/options");
+  const ceoManagerIds = ceoContextOptions.options.managers.map((manager) => manager.id);
+  assert.deepEqual(
+    new Set(ceoManagerIds),
+    new Set([gaId, gaPeerId, gsAId, gsBId]),
+    "CEO must receive only the permitted GA and GS UUID manager options.",
+  );
+  await openGlobalFilters();
+  assert.ok(
+    (await driver.findElements(By.css('select[aria-label="Gerente"]'))).length === 1,
+    "CEO with at least two real permitted managers must see the manager selector.",
+  );
   await request("/api/users/manager-incentives");
   await driver.get(`${baseUrl}/protected/gerentes`);
   await driver.wait(
@@ -633,7 +686,23 @@ try {
     0,
     "GO country must be fixed instead of selectable",
   );
-  await driver.findElement(By.xpath("//button[contains(., 'Periodo') or contains(., 'Filtros')]")).click();
+  await openGlobalFilters();
+  const goContextOptions = await request("/api/context/options");
+  const goManagerIds = goContextOptions.options.managers.map((manager) => manager.id);
+  assert.deepEqual(
+    new Set(goManagerIds),
+    new Set([gaId, gaPeerId]),
+    "GO must receive only in-country GA UUID manager options.",
+  );
+  const goManagerFilter = await driver.wait(until.elementLocated(By.css('select[aria-label="Gerente"]')), 10_000);
+  const goManagerOptionValues = await goManagerFilter.findElements(By.css("option"));
+  const goVisibleManagerIds = (await Promise.all(goManagerOptionValues.map((option) => option.getAttribute("value"))))
+    .filter((value) => value && !value.startsWith("__"));
+  assert.deepEqual(
+    new Set(goVisibleManagerIds),
+    new Set([gaId, gaPeerId]),
+    "GO header must only render GA UUID options.",
+  );
   const insideCreation = await request(
     "/api/branches",
   );
@@ -703,17 +772,18 @@ try {
     "The initial context requests must not be duplicated.",
   );
   const gaContextOptions = await request("/api/context/options");
-  assert.ok(
-    gaContextOptions.options.managers.some((manager) => manager.id === gsAId)
-      && gaContextOptions.options.managers.some((manager) => manager.id === gsBId),
-    "GA context must expose both GS UUIDs from the authoritative header source.",
+  assert.deepEqual(
+    new Set(gaContextOptions.options.managers.map((manager) => manager.id)),
+    new Set([gsAId, gsBId]),
+    "GA context must expose only its GS UUIDs from the authoritative header source.",
   );
   await openGlobalFilters();
   await capture("ga-global-filters");
   const managerFilter = await driver.wait(until.elementLocated(By.css('select[aria-label="Gerente"]')), 10_000);
   const managerOptionValues = await managerFilter.findElements(By.css("option"));
-  const managerIds = await Promise.all(managerOptionValues.map((option) => option.getAttribute("value")));
-  assert.ok(managerIds.includes(gsAId) && managerIds.includes(gsBId), "Manager options must use the actual GS UUID values.");
+  const managerIds = (await Promise.all(managerOptionValues.map((option) => option.getAttribute("value"))))
+    .filter((value) => value && !value.startsWith("__"));
+  assert.deepEqual(new Set(managerIds), new Set([gsAId, gsBId]), "GA manager options must use only actual GS UUID values.");
   await setGlobalPeriod("2026-07-01", "2026-07-31");
   let apply = await driver.findElement(By.xpath("//button[normalize-space(.)='Aplicar filtros']"));
   const filterApplyStartedAt = Date.now();
@@ -809,10 +879,12 @@ try {
     "GS with one assignment must not render a context selector",
   );
   assert.equal(
-    (await driver.findElements(By.css('select[aria-label="País"], select[aria-label="Área"], select[aria-label="Gerente de sucursal"]'))).length,
+    (await driver.findElements(By.css('select[aria-label="País"], select[aria-label="Área"], select[aria-label="Gerente"]'))).length,
     0,
     "GS must not receive country, area, or manager selectors",
   );
+  const gsContextOptions = await request("/api/context/options");
+  assert.deepEqual(gsContextOptions.options.managers, [], "GS must not receive manager filter options.");
   await request("/api/users/manager-incentives", 403);
   await request("/api/users/branch-managers", 403);
   await assertForbidden("/protected/usuarios-permisos");

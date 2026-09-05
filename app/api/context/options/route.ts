@@ -2,10 +2,59 @@ import { NextResponse } from "next/server";
 
 import { getCurrentAuthorizationActor } from "@/lib/server/authorization";
 import { resolveV7ActorFromCurrent } from "@/lib/v7/server/api-auth";
-import { getTenantContextOptions } from "@/lib/v7/server/tenant-context";
+import {
+  getTenantContextOptions,
+  type ManagerOption,
+  type TenantContextOptions,
+} from "@/lib/v7/server/tenant-context";
 
 function jsonError(error: string, status: number) {
   return NextResponse.json({ error, ok: false }, { status });
+}
+
+function uniqueManagers(managers: readonly ManagerOption[]) {
+  return Array.from(new Map(managers.map((manager) => [manager.id, manager])).values());
+}
+
+/**
+ * The manager selector is an authorization boundary, not a directory. Keep
+ * its values as profile UUIDs and expose only the manager level the active
+ * role is permitted to use as a BI filter.
+ */
+function managersForActor(
+  roleKey: string,
+  countryId: string | null | undefined,
+  context: TenantContextOptions,
+) {
+  if (["ceo", "super_admin", "webmaster_admin"].includes(roleKey)) {
+    return uniqueManagers([...context.areaManagers, ...context.branchManagers]);
+  }
+
+  if (roleKey === "gerente_operaciones") {
+    const areaIdsInCountry = new Set(
+      context.operationalAreas
+        .filter((area) => !countryId || area.countryId === countryId)
+        .map((area) => area.id),
+    );
+    return uniqueManagers(
+      context.areaManagers.filter((manager) =>
+        Boolean(manager.operationalAreaId && areaIdsInCountry.has(manager.operationalAreaId)),
+      ),
+    );
+  }
+
+  if (roleKey === "gerente_area") {
+    const visibleBranchIds = new Set(context.branches.map((branch) => branch.id));
+    return uniqueManagers(
+      context.branchManagers.filter((manager) =>
+        Boolean(manager.branchId && visibleBranchIds.has(manager.branchId)),
+      ),
+    );
+  }
+
+  // Gerentes de sucursal and non-manager roles do not receive a manager
+  // filter unless a future, explicit server-side grant adds that capability.
+  return [];
 }
 
 export async function GET() {
@@ -71,10 +120,8 @@ export async function GET() {
         name: country.name,
         timeZone: "America/El_Salvador",
       })),
-      managers: [
-        ...context.areaManagers.map((manager) => ({ id: manager.id, name: manager.name })),
-        ...context.branchManagers.map((manager) => ({ id: manager.id, name: manager.name })),
-      ],
+      managers: managersForActor(actor.roleKey, actor.scope.countryId, context)
+        .map((manager) => ({ id: manager.id, name: manager.name })),
       operationalAreas: context.operationalAreas.map((area) => ({
         areaZone: area.name,
         businessLineCode: lineByCompanyId.get(area.parentId)?.code ?? "PHYSIOTHERAPY",
