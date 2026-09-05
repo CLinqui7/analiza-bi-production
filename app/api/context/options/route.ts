@@ -23,7 +23,7 @@ function uniqueManagers(managers: readonly ManagerOption[]) {
  */
 function managersForActor(
   roleKey: string,
-  countryId: string | null | undefined,
+  countryIds: ReadonlySet<string>,
   context: TenantContextOptions,
 ) {
   if (["ceo", "super_admin", "webmaster_admin"].includes(roleKey)) {
@@ -31,9 +31,10 @@ function managersForActor(
   }
 
   if (roleKey === "gerente_operaciones") {
+    if (countryIds.size === 0) return [];
     const areaIdsInCountry = new Set(
       context.operationalAreas
-        .filter((area) => !countryId || area.countryId === countryId)
+        .filter((area) => Boolean(area.countryId && countryIds.has(area.countryId)))
         .map((area) => area.id),
     );
     return uniqueManagers(
@@ -71,6 +72,12 @@ export async function GET() {
   try {
     const v7Actor = await resolveV7ActorFromCurrent(actor);
     const context = await getTenantContextOptions(v7Actor);
+    const actorCountryIds = new Set(
+      [
+        actor.scope.countryId,
+        ...(v7Actor.scopeGrants ?? []).map((grant) => grant.countryId),
+      ].filter((countryId): countryId is string => Boolean(countryId)),
+    );
     const lineByCompanyId = new Map(
       context.businessLines.map((line) => [line.parentId, line]),
     );
@@ -120,7 +127,7 @@ export async function GET() {
         name: country.name,
         timeZone: "America/El_Salvador",
       })),
-      managers: managersForActor(actor.roleKey, actor.scope.countryId, context)
+      managers: managersForActor(actor.roleKey, actorCountryIds, context)
         .map((manager) => ({ id: manager.id, name: manager.name })),
       operationalAreas: context.operationalAreas.map((area) => ({
         areaZone: area.name,
