@@ -109,10 +109,21 @@ const rows = (slotsResult.data ?? []).map((slot) => {
   || left.branchCode.localeCompare(right.branchCode),
 );
 
-const summary = Object.fromEntries(
-  ["READY", "NO_CLOSING", "MISSING_TARGET", "MISSING_MANAGER", "VACANT_MANAGER", "MISSING_REQUIRED_CONFIGURATION"]
-    .map((status) => [status, rows.filter((row) => row.statuses.includes(status)).length]),
-);
+const countStatus = (status) => rows.filter((row) => row.statuses.includes(status)).length;
+const summary = {
+  branchLineSlotsTotal: rows.length,
+  slotsWithClosing: rows.length - countStatus("NO_CLOSING"),
+  slotsWithoutClosing: countStatus("NO_CLOSING"),
+  slotsWithTarget: rows.length - countStatus("MISSING_TARGET"),
+  slotsWithoutTarget: countStatus("MISSING_TARGET"),
+  readySlots: countStatus("READY"),
+  slotsByLine: Object.fromEntries(
+    [...new Set(rows.map((row) => row.businessLine))].sort().map((line) => [line, rows.filter((row) => row.businessLine === line).length]),
+  ),
+  vacantManagerSlots: countStatus("VACANT_MANAGER"),
+  missingManagerSlots: countStatus("MISSING_MANAGER"),
+  missingRequiredConfigurationSlots: countStatus("MISSING_REQUIRED_CONFIGURATION"),
+};
 const report = {
   generatedAt: new Date().toISOString(),
   mode: "read-only",

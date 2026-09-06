@@ -6,8 +6,9 @@ import { resolve } from "node:path";
 import { Builder, By, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 import { createClient } from "@supabase/supabase-js";
+import * as XLSX from "xlsx";
 
-const baseUrl = (process.env.QA_BASE_URL ?? "http://127.0.0.1:3000").replace(
+const baseUrl = (process.env.QA_BASE_URL ?? "http://localhost:3000").replace(
   /\/$/,
   "",
 );
@@ -135,14 +136,21 @@ async function login(email) {
   await driver.findElement(By.id("email")).sendKeys(email);
   await driver.findElement(By.id("password")).sendKeys(password);
   await driver.findElement(By.css("button[type=submit]")).click();
-  await driver.wait(
-    async () => (await driver.getCurrentUrl()).includes("/protected"),
-    15_000,
-  );
-  await driver.wait(
-    async () => !/Verificando acceso autorizado/.test(await bodyText()),
-    15_000,
-  );
+  try {
+    await driver.wait(
+      async () => (await driver.getCurrentUrl()).includes("/protected") || (await driver.findElements(By.css(".border-red-200"))).length > 0,
+      15_000,
+    );
+    if (!(await driver.getCurrentUrl()).includes("/protected")) {
+      throw new Error(`Login rejected: ${(await bodyText()).slice(-400)}`);
+    }
+    await driver.wait(
+      async () => !/Verificando acceso autorizado/.test(await bodyText()),
+      15_000,
+    );
+  } catch (error) {
+    throw new Error(`QA login did not complete at ${await driver.getCurrentUrl()}: ${(await bodyText()).slice(-700)}`, { cause: error });
+  }
 }
 
 async function assertForbidden(path) {
@@ -172,17 +180,191 @@ async function request(path, expectedStatus = 200) {
   return result.body;
 }
 
+async function download(path, expectedStatus = 200) {
+  const result = await driver.executeAsyncScript(
+    `const done=arguments[arguments.length-1]; fetch(${JSON.stringify(path)},{cache:'no-store'}).then(async response=>{
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      done({contentDisposition:response.headers.get('content-disposition') ?? '', contentType:response.headers.get('content-type') ?? '', bytes:Array.from(bytes), status:response.status});
+    }).catch(error=>done({error:String(error),status:0}));`,
+  );
+  assert.equal(result.status, expectedStatus, `${path} unexpected download status`);
+  return result;
+}
+
+async function postTargetImport(csv, dryRun) {
+  return driver.executeAsyncScript(
+    `const done=arguments[arguments.length-1]; const form=new FormData();
+      form.append('file',new File([${JSON.stringify(csv)}],'kpi-targets-qa.csv',{type:'text/csv'}));
+      form.append('dryRun',${JSON.stringify(String(dryRun))});
+      fetch('/api/kpi-targets/import',{method:'POST',body:form}).then(async response=>{
+        const raw=await response.text(); let body=null; try{body=JSON.parse(raw)}catch{} done({body,status:response.status});
+      }).catch(error=>done({error:String(error),status:0}));`,
+  );
+}
+
+function assertMonthlyTemplate(downloaded, lineName) {
+  assert.match(downloaded.contentDisposition, /attachment; filename=.*\.xlsx/i, `${lineName} template must be an attachment.`);
+  assert.match(downloaded.contentType, /spreadsheetml/i, `${lineName} template must be XLSX.`);
+  const workbook = XLSX.read(Buffer.from(downloaded.bytes), { type: "buffer", cellFormula: true });
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: "" });
+  assert.deepEqual(rows[0], ["Nombre de campo", "Campo técnico", "Descripción", "Obligatorio", "Tipo de dato", "Unidad", "Ejemplo no productivo", "Reglas de validación"]);
+  assert.ok(rows.length > 1, `${lineName} template must contain form fields.`);
+  assert.ok(rows.slice(1).some((row) => row[3] === "Sí"), `${lineName} template must identify required fields.`);
+  assert.equal(Object.values(sheet).filter((cell) => cell && typeof cell === "object" && "f" in cell).length, 0, `${lineName} template must not contain formulas.`);
+  assert.equal(rows.flat().filter((value) => typeof value === "string" && /^[=+@-]/.test(value.trim())).length, 0, `${lineName} template must not contain dangerous spreadsheet formulas.`);
+}
+
+async function installMonthlyFetchRecorder() {
+  await driver.executeScript(`window.__qaLastPublish = null; window.__qaLastSave = null;
+    if (!window.__qaMonthlyFetchRecorder) {
+      window.__qaMonthlyFetchRecorder = true;
+      const originalFetch = window.fetch;
+      window.fetch = async (...args) => {
+        const response = await originalFetch(...args);
+        const url = String(args[0]);
+        if (url.includes('/api/monthly-submissions/publish')) {
+          let body = null; try { body = await response.clone().json(); } catch {}
+          window.__qaLastPublish = { status: response.status, body };
+        }
+        if (url.endsWith('/api/monthly-submissions') && args[1]?.method === 'POST') {
+          let body = null; try { body = await response.clone().json(); } catch {}
+          window.__qaLastSave = { body, request: args[1].body, status: response.status };
+        }
+        return response;
+      };
+    }`);
+}
+
+async function selectMonthlyAssignment(assignmentLabel, templateSlug) {
+  const assignment = await driver.wait(until.elementLocated(By.css("[data-testid=monthly-assignment] select")), 15_000);
+  let option = null;
+  for (const candidate of await assignment.findElements(By.css("option"))) {
+    if ((await candidate.getText()) === assignmentLabel) {
+      option = candidate;
+      break;
+    }
+  }
+  assert.ok(option, `QA assignment must exist: ${assignmentLabel}`);
+  const assignmentId = await option.getAttribute("value");
+  await assignment.sendKeys(assignmentLabel);
+  await driver.wait(async () => (await assignment.getAttribute("value")) === assignmentId, 10_000);
+  const template = await driver.wait(until.elementLocated(By.css("[data-testid=monthly-download-template]")), 15_000);
+  assert.match(await template.getAttribute("href"), new RegExp(`/api/monthly-templates/${templateSlug}\\?format=xlsx$`), "The visible template button must match only the current assignment line.");
+}
+
+async function setMonthlyPeriod(period) {
+  const periodSelect = await driver.wait(until.elementLocated(By.css("[data-testid=monthly-period] select")), 10_000);
+  await driver.executeScript(
+    `const select=arguments[0], value=arguments[1]; if (![...select.options].some(option=>option.value===value)) throw new Error('QA period unavailable: '+value);
+      const set=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;
+      set.call(select,value); select.dispatchEvent(new Event('input',{bubbles:true})); select.dispatchEvent(new Event('change',{bubbles:true}));`,
+    periodSelect,
+    period,
+  );
+}
+
+async function fillMonthlyForm(period) {
+  const [year, month] = period.split("-");
+  const dateValue = `${month}/28/${year}`;
+  const formStepCount = (await driver.findElements(By.css("[data-testid=monthly-form-steps] button"))).length - 1;
+  for (let stepIndex = 0; stepIndex < formStepCount; stepIndex += 1) {
+    const formStepButtons = await driver.findElements(By.css("[data-testid=monthly-form-steps] button"));
+    await driver.executeScript("arguments[0].scrollIntoView({ block: 'center' });", formStepButtons[stepIndex]);
+    await formStepButtons[stepIndex].click();
+    const inputs = await driver.findElements(By.css("input[id^=monthly-]:not([disabled])"));
+    for (const input of inputs) {
+      const type = await input.getAttribute("type");
+      await input.clear();
+      await input.sendKeys(type === "date" ? dateValue : type === "month" ? `${month}/${year}` : type === "number" ? "1" : "Cierre QA");
+    }
+    const selects = await driver.findElements(By.css("select:not([disabled])"));
+    for (const select of selects) {
+      const contextual = await driver.executeScript("return Boolean(arguments[0].closest('[data-testid=monthly-period],[data-testid=monthly-assignment]'));", select);
+      if (!contextual) {
+        const choices = await select.findElements(By.css("option"));
+        if (choices.length > 1) await choices[1].click();
+      }
+    }
+  }
+}
+
+async function publishCompleteMonthlyLine({ assignmentLabel, branchId, lineId, lineName, period, templateSlug }) {
+  await driver.get(`${baseUrl}/protected/plantillas`);
+  await driver.wait(until.elementLocated(By.css("[data-testid=monthly-derived-context]")), 15_000);
+  await selectMonthlyAssignment(assignmentLabel, templateSlug);
+  await setMonthlyPeriod(period);
+  await installMonthlyFetchRecorder();
+  await driver.findElement(By.css("[data-testid=monthly-final-step]")).click();
+  await capture("gs-final-step");
+  await driver.findElement(By.css("[data-testid=monthly-save-draft]")).click();
+  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastSave;")), 15_000);
+  const incompleteSave = await driver.executeScript("return window.__qaLastSave;");
+  assert.equal(incompleteSave.status, 201, `${lineName} incomplete draft must be created with HTTP 201.`);
+  assert.ok((await driver.findElements(By.css("[data-testid=monthly-pending-blockers]"))).length === 1, `${lineName} incomplete draft must expose blockers.`);
+  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
+  await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
+  await driver.executeScript("window.__qaLastPublish = null;");
+  await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
+  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 15_000);
+  assert.equal((await driver.executeScript("return window.__qaLastPublish;")).status, 422, `${lineName} incomplete draft must not publish.`);
+  await fillMonthlyForm(period);
+  await driver.findElement(By.css("[data-testid=monthly-final-step]")).click();
+  await driver.executeScript("window.__qaLastSave = null;");
+  await driver.findElement(By.css("[data-testid=monthly-save-draft]")).click();
+  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastSave;")), 15_000);
+  assert.equal((await driver.executeScript("return window.__qaLastSave;")).status, 201, `${lineName} completed draft must be versioned with HTTP 201.`);
+  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
+  await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
+  await driver.executeScript("window.__qaLastPublish = null;");
+  await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
+  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 30_000);
+  const published = await driver.executeScript("return window.__qaLastPublish;");
+  assert.equal(published.status, 200, `${lineName} completed draft must publish: ${JSON.stringify(published.body)}`);
+  const closing = await admin.from("closing_versions").select("id,status").eq("branch_id", branchId).eq("business_line_id", lineId).eq("period_start", `${period}-01`).eq("status", "published").maybeSingle();
+  fail(closing.error, `${lineName} published closing lookup`);
+  assert.ok(closing.data?.id, `${lineName} must create an official published closing.`);
+  const kpis = await admin.from("closing_kpi_results").select("id").eq("closing_version_id", closing.data.id);
+  fail(kpis.error, `${lineName} KPI lookup`);
+  assert.ok(kpis.data.length > 0, `${lineName} closing must produce KPI results.`);
+  const periodQuery = `from=${period}-01&to=${period}-28&branch=${branchId}&line=${lineId}`;
+  await driver.get(`${baseUrl}/protected/resultados?${periodQuery}`);
+  await waitForDashboard("Resultados operativos");
+  assert.match(await bodyText(), new RegExp(lineName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${lineName} must be visible in Resultados.`);
+  await driver.get(`${baseUrl}/protected/cierres?${periodQuery}`);
+  await waitForDashboard("Historial de cierres");
+  assert.ok((await driver.findElements(By.css("[data-testid=bi-history-entry]"))).length >= 1, `${lineName} must be visible in Historial.`);
+}
+
+async function verifyManagerLineViews({ branchId, lineId, lineName, period }) {
+  const periodQuery = `from=${period}-01&to=${period}-28&branch=${branchId}&line=${lineId}`;
+  const escapedName = new RegExp(lineName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  await driver.get(`${baseUrl}/protected/resultados?${periodQuery}`);
+  await waitForDashboard("Resultados operativos");
+  assert.match(await bodyText(), escapedName, `${lineName} must remain isolated in Resultados.`);
+  await driver.get(`${baseUrl}/protected/sucursales?${periodQuery}`);
+  await waitForDashboard("Sucursales");
+  assert.match(await bodyText(), escapedName, `${lineName} must remain isolated in Sucursales.`);
+  await driver.get(`${baseUrl}/protected/cierres?${periodQuery}`);
+  await waitForDashboard("Historial de cierres");
+  assert.ok((await driver.findElements(By.css("[data-testid=bi-history-entry]"))).length >= 1, `${lineName} must remain visible in Historial.`);
+}
+
 async function capture(name) {
   const screenshot = await driver.takeScreenshot();
   await writeFile(resolve(artifacts, `${name}.png`), screenshot, "base64");
 }
 
 async function waitForDashboard(title) {
-  await driver.wait(
-    until.elementLocated(By.css("[data-testid=official-branch-bi]")),
-    15_000,
-  );
-  assert.match(await bodyText(), new RegExp(title));
+  try {
+    await driver.wait(
+      until.elementLocated(By.css("[data-testid=official-branch-bi]")),
+      15_000,
+    );
+    assert.match(await bodyText(), new RegExp(title));
+  } catch (error) {
+    throw new Error(`Dashboard ${title} did not become ready at ${await driver.getCurrentUrl()}: ${(await bodyText()).slice(0, 500)}`, { cause: error });
+  }
 }
 
 async function setGlobalPeriod(from, to) {
@@ -319,6 +501,18 @@ try {
     .select("id")
     .single();
   fail(laboratoryLine.error, "QA second business-line creation");
+  const imagingLine = await admin
+    .from("business_lines")
+    .insert({
+      code: "IMAGING",
+      company_id: company.data.id,
+      is_demo: false,
+      name: "Imágenes QA",
+      organization_id: organizationId,
+    })
+    .select("id")
+    .single();
+  fail(imagingLine.error, "QA imaging business-line creation");
   const area = await admin
     .from("operational_areas")
     .insert({
@@ -500,6 +694,30 @@ try {
       user_id: gsAId,
     },
     {
+      branch_id: branchA.id,
+      business_line_code: "LABORATORY",
+      business_line_id: laboratoryLine.data.id,
+      company_id: company.data.id,
+      country_id: country.data.id,
+      operational_area_id: area.data.id,
+      organization_id: organizationId,
+      role_id: roleId.gerente_sucursal,
+      status: "active",
+      user_id: gsAId,
+    },
+    {
+      branch_id: branchA.id,
+      business_line_code: "IMAGING",
+      business_line_id: imagingLine.data.id,
+      company_id: company.data.id,
+      country_id: country.data.id,
+      operational_area_id: area.data.id,
+      organization_id: organizationId,
+      role_id: roleId.gerente_sucursal,
+      status: "active",
+      user_id: gsAId,
+    },
+    {
       branch_id: branchB.id,
       business_line_code: "PHYSIOTHERAPY",
       business_line_id: line.data.id,
@@ -664,6 +882,29 @@ try {
     (await driver.findElements(By.css('select[aria-label="Gerente"]'))).length === 1,
     "CEO with at least two real permitted managers must see the manager selector.",
   );
+  for (const [slug, name] of [["laboratory", "Laboratorio"], ["imaging", "Imágenes"], ["physiotherapy", "Fisioterapia"]]) {
+    assertMonthlyTemplate(await download(`/api/monthly-templates/${slug}?format=xlsx`), name);
+    const csvTemplate = await download(`/api/monthly-templates/${slug}?format=csv`);
+    assert.match(csvTemplate.contentDisposition, /attachment; filename=.*\.csv/i, `${name} CSV template must be an attachment.`);
+    assert.match(Buffer.from(csvTemplate.bytes).toString("utf8"), /Campo técnico/, `${name} CSV template must retain the field contract.`);
+  }
+  const targetTemplate = await download("/api/kpi-targets/import");
+  assert.match(targetTemplate.contentDisposition, /attachment; filename="kpi-targets-template\.csv"/i, "Target template must be downloadable.");
+  assert.match(Buffer.from(targetTemplate.bytes).toString("utf8"), /country_id,company_id,operational_area_id,branch_id,business_line_id,period,kpi_code/, "Target template must retain the import contract.");
+  const targetHeader = "country_id,company_id,operational_area_id,branch_id,business_line_id,period,kpi_code,kpi_name,target_value,unit,direction,approval_status";
+  const targetCsv = `${targetHeader}\n${country.data.id},${company.data.id},${area.data.id},${branchA.id},${line.data.id},2026-08,target_import_qa,Meta importada QA,2000,currency,HIGHER_IS_BETTER,approved\n`;
+  const targetDryRun = await postTargetImport(targetCsv, true);
+  assert.equal(targetDryRun.status, 200, "Target import dry run must succeed.");
+  assert.deepEqual(targetDryRun.body, { dryRun: true, rowsValid: 1, rowsRejected: 0 }, "Target dry run must validate the exact row.");
+  const targetFirstApply = await postTargetImport(targetCsv, false);
+  assert.equal(targetFirstApply.status, 200, "Target import apply must create the approved target.");
+  assert.equal(targetFirstApply.body?.inserted, 1, "Target import first apply must insert exactly once.");
+  const targetSecondApply = await postTargetImport(targetCsv, false);
+  assert.equal(targetSecondApply.status, 200, "Target import repeated apply must upsert.");
+  assert.equal(targetSecondApply.body?.updated, 1, "Target import repeated apply must update, not duplicate.");
+  const invalidScopeCsv = `${targetHeader}\n00000000-0000-4000-8000-000000000001,${company.data.id},${area.data.id},${branchA.id},${line.data.id},2026-08,target_import_qa,Meta importada QA,2000,currency,HIGHER_IS_BETTER,approved\n`;
+  const targetInvalidScope = await postTargetImport(invalidScopeCsv, true);
+  assert.equal(targetInvalidScope.status, 422, "Target import must reject a catalog scope mismatch.");
   await request("/api/users/manager-incentives");
   await driver.get(`${baseUrl}/protected/gerentes`);
   await driver.wait(
@@ -874,11 +1115,6 @@ try {
   await driver.get(`${baseUrl}/protected/mi-sucursal`);
   await waitForDashboard("Mi sucursal");
   assert.equal(
-    (await driver.findElements(By.css('select[aria-label="Asignación"]'))).length,
-    0,
-    "GS with one assignment must not render a context selector",
-  );
-  assert.equal(
     (await driver.findElements(By.css('select[aria-label="País"], select[aria-label="Área"], select[aria-label="Gerente"]'))).length,
     0,
     "GS must not receive country, area, or manager selectors",
@@ -894,6 +1130,8 @@ try {
     until.elementLocated(By.css("[data-testid=monthly-derived-context]")),
     15_000,
   );
+  assert.equal((await driver.findElements(By.css("[data-testid=monthly-assignment] select"))).length, 1, "GS with several branch+line assignments must choose the exact current unit.");
+  await selectMonthlyAssignment("Sucursal QA A · Fisioterapia", "physiotherapy");
   await capture("gs-form-before-save");
   await driver.findElement(By.css("[data-testid=monthly-final-step]")).click();
   await driver.wait(
@@ -904,11 +1142,12 @@ try {
     until.elementLocated(By.css("[data-testid=monthly-save-draft]")),
     15_000,
   );
+  await installMonthlyFetchRecorder();
   await saveButton.click();
-  await driver.wait(
-    async () => /guardada como borrador/i.test(await bodyText()),
-    15_000,
-  );
+  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastSave;")), 15_000);
+  const physiotherapyIncompleteSave = await driver.executeScript("return window.__qaLastSave;");
+  assert.equal(physiotherapyIncompleteSave.status, 201, `Physiotherapy incomplete draft must be created with HTTP 201: ${JSON.stringify(physiotherapyIncompleteSave.body)}`);
+  await capture("gs-incomplete-saved");
   assert.ok(
     (await driver.findElements(By.css("[data-testid=monthly-pending-blockers]"))).length === 1,
     "An incomplete draft must show publication blockers as pending work.",
@@ -920,12 +1159,14 @@ try {
     30_000,
   );
   assert.match(await bodyText(), /monthly-evidence\.csv/, "The finalized CSV attachment must be visible.");
-  await driver.executeScript(`window.__qaLastPublish = null; window.__qaLastSave = null; const originalFetch = window.fetch; window.fetch = async (...args) => { const response = await originalFetch(...args); const url = String(args[0]); if (url.includes('/api/monthly-submissions/publish')) { let body = null; try { body = await response.clone().json(); } catch {} window.__qaLastPublish = { status: response.status, body }; } if (url.endsWith('/api/monthly-submissions') && args[1]?.method === 'POST') { window.__qaLastSave = { request: args[1].body, status: response.status }; } return response; };`);
+  await capture("gs-incomplete-attachment");
+  await driver.executeScript("window.__qaLastPublish = null; window.__qaLastSave = null;");
   await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
   await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 15_000);
   const incompletePublish = await driver.executeScript("return window.__qaLastPublish;");
   assert.equal(incompletePublish.status, 422, "Publishing an incomplete draft must be blocked.");
   assert.equal(incompletePublish.body?.error, "INCOMPLETE_MONTHLY_FORM", "The publish blocker must be explicit.");
+  await capture("gs-incomplete-blocked");
   const formStepCount = (await driver.findElements(By.css("[data-testid=monthly-form-steps] button"))).length - 1;
   for (let stepIndex = 0; stepIndex < formStepCount; stepIndex += 1) {
     const formStepButtons = await driver.findElements(By.css("[data-testid=monthly-form-steps] button"));
@@ -955,10 +1196,14 @@ try {
   await patientsTotal.sendKeys("1");
   await driver.executeScript("arguments[0].blur();", patientsTotal);
   await driver.wait(async () => (await patientsTotal.getAttribute("value")) === "1", 5_000);
+  await capture("gs-form-filled");
   await driver.findElement(By.css("[data-testid=monthly-final-step]")).click();
+  await driver.executeScript("window.__qaLastSave = null;");
   await driver.findElement(By.css("[data-testid=monthly-save-draft]")).click();
-  await driver.wait(async () => /Versión 2 guardada como borrador/.test(await bodyText()), 15_000);
-  const completedSave = JSON.parse(await driver.executeScript("return window.__qaLastSave?.request ?? '{}';"));
+  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastSave;")), 15_000);
+  const secondPhysiotherapySave = await driver.executeScript("return window.__qaLastSave;");
+  assert.equal(secondPhysiotherapySave.status, 201, `Physiotherapy completed draft must be versioned with HTTP 201: ${JSON.stringify(secondPhysiotherapySave.body)}`);
+  const completedSave = JSON.parse(secondPhysiotherapySave.request ?? "{}");
   assert.equal(completedSave.responses?.patients_total, 1, "The completed save must contain patients_total.");
   await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
   await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
@@ -989,6 +1234,29 @@ try {
     `/api/monthly-submissions?branchId=${branchA.id}&businessLineId=${line.data.id}`,
   );
   await capture("gs");
+  await publishCompleteMonthlyLine({
+    assignmentLabel: "Sucursal QA A · Laboratorio QA",
+    branchId: branchA.id,
+    lineId: laboratoryLine.data.id,
+    lineName: "Laboratorio QA",
+    period: "2026-06",
+    templateSlug: "laboratory",
+  });
+  await publishCompleteMonthlyLine({
+    assignmentLabel: "Sucursal QA A · Imágenes QA",
+    branchId: branchA.id,
+    lineId: imagingLine.data.id,
+    lineName: "Imágenes QA",
+    period: "2026-05",
+    templateSlug: "imaging",
+  });
+  await login(emails.ga);
+  for (const view of [
+    { branchId: branchA.id, lineId: line.data.id, lineName: "Fisioterapia", period: "2026-09" },
+    { branchId: branchA.id, lineId: laboratoryLine.data.id, lineName: "Laboratorio QA", period: "2026-06" },
+    { branchId: branchA.id, lineId: imagingLine.data.id, lineName: "Imágenes QA", period: "2026-05" },
+  ]) await verifyManagerLineViews(view);
+  await capture("all-lines-published");
 
   await writeFile(
     resolve(artifacts, "result.json"),

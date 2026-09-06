@@ -25,6 +25,7 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const allowedUnits = new Set(["currency", "count", "ratio"]);
 const allowedDirections = new Set(["HIGHER_IS_BETTER", "LOWER_IS_BETTER"]);
 const allowedStatuses = new Set(["active", "approved"]);
+const targetTemplateHeader = requiredColumns.join(",");
 
 type ImportedRow = {
   row: number;
@@ -115,6 +116,21 @@ function parseRows(fileName: string, bytes: Uint8Array) {
       direction: raw.direction as ImportedRow["direction"],
       status: raw.approval_status as ImportedRow["status"],
     }];
+  });
+}
+
+export async function GET() {
+  const actorOrResponse = await actorForApi("goals.manage");
+  if (isApiResponse(actorOrResponse)) return actorOrResponse;
+  if (!["ceo", "super_admin", "webmaster_admin"].includes(actorOrResponse.roleKey)) {
+    return NextResponse.json({ error: "TARGET_IMPORT_ADMIN_ONLY" }, { status: 403 });
+  }
+  return new NextResponse(`${targetTemplateHeader}\n`, {
+    headers: {
+      "Content-Disposition": 'attachment; filename="kpi-targets-template.csv"',
+      "Content-Type": "text/csv; charset=utf-8",
+      "Cache-Control": "no-store",
+    },
   });
 }
 

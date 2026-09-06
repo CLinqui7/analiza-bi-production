@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { Builder, By, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 
-const baseUrl = (process.env.QA_BASE_URL ?? process.env.QA_TEST_BASE_URL ?? "http://127.0.0.1:3000").replace(/\/$/, "");
+const baseUrl = (process.env.QA_BASE_URL ?? process.env.QA_TEST_BASE_URL ?? "http://localhost:3000").replace(/\/$/, "");
 const output = resolve("artifacts/selenium");
 const screenshots = resolve(output, "screenshots");
 const network = resolve(output, "network");

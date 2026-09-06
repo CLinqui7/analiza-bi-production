@@ -183,6 +183,13 @@ function monthBounds(month: string) {
   };
 }
 
+function monthlyTemplateLine(line: ImportBusinessLine | null) {
+  if (line === "Laboratorio") return "laboratory";
+  if (line === "Imagenes") return "imaging";
+  if (line === "Fisioterapia") return "physiotherapy";
+  return null;
+}
+
 function loadDeadline(month: string) {
   const match = /^(\d{4})-(\d{2})$/.exec(month);
   if (!match) return "";
@@ -894,6 +901,7 @@ export function MonthlySubmissionCenter({
   }
 
   const step = isFinalStep ? null : steps[currentStep] ?? null;
+  const templateLine = monthlyTemplateLine(formLine);
 
   return (
     <div className="grid gap-5">
@@ -919,6 +927,16 @@ export function MonthlySubmissionCenter({
             <DerivedContextField label="Empresa / unidad" description="Derivada de tu asignación activa." value={selectedAssignment.company.name} />
             <DerivedContextField label="Área operativa" description="Derivada de la sucursal asignada." value={selectedAssignment.operationalArea?.name ?? "Pendiente de asignación"} />
           </div>
+
+          {templateLine && (
+            <div className="flex justify-end">
+              <Button asChild type="button" variant="outline" size="sm">
+                <a data-testid="monthly-download-template" href={`/api/monthly-templates/${templateLine}?format=xlsx`}>
+                  <Download className="mr-2 size-4" /> Descargar plantilla Excel
+                </a>
+              </Button>
+            </div>
+          )}
 
           <div className="rounded-lg border bg-muted/20 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2 text-sm">

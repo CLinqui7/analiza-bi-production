@@ -36,4 +36,4 @@ Ejecutar `node scripts/production-data-readiness.mjs` con credenciales de admini
 - `artifacts/production-data-readiness.json`
 - `artifacts/production-data-readiness.csv`
 
-Cada fila representa exactamente un branch+line y puede incluir `READY`, `NO_CLOSING`, `MISSING_TARGET`, `MISSING_MANAGER`, `VACANT_MANAGER` o `MISSING_REQUIRED_CONFIGURATION`. El reporte usa referencias de área opacas y no incluye personas, correos, tokens ni contenido de archivos.
+Cada fila representa exactamente una unidad sucursal+línea y puede incluir `READY`, `NO_CLOSING`, `MISSING_TARGET`, `MISSING_MANAGER`, `VACANT_MANAGER` o `MISSING_REQUIRED_CONFIGURATION`. No se interpreta como conteo de sucursales. El resumen nombra explícitamente `branchLineSlotsTotal`, `slotsWithClosing`, `slotsWithoutClosing`, `slotsWithTarget`, `slotsWithoutTarget` y `readySlots`; también incluye `slotsByLine`. El reporte usa referencias de área opacas y no incluye personas, correos, tokens ni contenido de archivos.
