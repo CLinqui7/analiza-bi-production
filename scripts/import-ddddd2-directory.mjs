@@ -3,6 +3,12 @@ import { basename, resolve } from "node:path";
 
 import { createClient } from "@supabase/supabase-js";
 import * as XLSX from "xlsx";
+import {
+  assignmentKey,
+  buildBranchManagerEmailIndex,
+  normal,
+  normalizeEmail,
+} from "./lib/directory-email-identity.mjs";
 
 const args = process.argv.slice(2);
 const fileIndex = args.indexOf("--file");
@@ -28,10 +34,6 @@ function envFile(path) {
 
 function text(value) {
   return typeof value === "string" ? value.trim() : "";
-}
-
-function normal(value) {
-  return text(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
 }
 
 function isVacancy(value) {
@@ -66,12 +68,7 @@ const areaManagerRows = rowsFor(workbook.Sheets["gerentes de área"]);
 
 if (directoryRows.length !== 95) throw new Error("DIRECTORY_ROW_COUNT_INVALID");
 
-const emailsByName = new Map();
-for (const row of [...branchManagerRows, ...areaManagerRows]) {
-  const name = row["Gerente de sucursal"] ?? row["Gerente de area"];
-  const email = row.correo ?? row.Correo;
-  if (text(name) && text(email)) emailsByName.set(normal(name), text(email).toLowerCase());
-}
+const branchManagerEmails = buildBranchManagerEmailIndex(branchManagerRows);
 
 const normalizedRows = directoryRows.map((row, index) => ({
   row: index + 2,
@@ -117,7 +114,10 @@ if (apply) {
   const roleByKey = new Map(roles.map((role) => [role.key, role.id]));
   if (!roleByKey.get("gerente_area") || !roleByKey.get("gerente_sucursal")) throw new Error("DIRECTORY_ROLE_CATALOG_INCOMPLETE");
   const profilesForOrganization = profiles.filter((profile) => profile.organization_id === organization.id);
-  const profileByEmail = new Map(profilesForOrganization.filter((profile) => text(profile.email)).map((profile) => [text(profile.email).toLowerCase(), profile]));
+  const profileByEmail = new Map(profilesForOrganization.flatMap((profile) => {
+    const email = normalizeEmail(profile.email);
+    return email ? [[email, profile]] : [];
+  }));
   const profileByName = new Map(profilesForOrganization.filter((profile) => text(profile.display_name)).map((profile) => [normal(profile.display_name), profile]));
   const appliedAreaManagers = new Set();
   const appliedAreaBranches = new Set();
@@ -135,8 +135,9 @@ if (apply) {
     const areaManagerKey = `${area.id}|${normal(item.areaManager)}`;
     if (!appliedAreaManagers.has(areaManagerKey)) {
       appliedAreaManagers.add(areaManagerKey);
-      const areaEmail = emailsByName.get(normal(item.areaManager));
-      const areaProfile = (areaEmail ? profileByEmail.get(areaEmail) : null) ?? profileByName.get(normal(item.areaManager)) ?? null;
+      const areaRow = areaManagerRows.find((row) => normal(row["Gerente de area"]) === normal(item.areaManager));
+      const areaEmail = normalizeEmail(areaRow?.correo ?? areaRow?.Correo);
+      const areaProfile = areaEmail ? profileByEmail.get(areaEmail) ?? null : profileByName.get(normal(item.areaManager)) ?? null;
       if (!areaProfile) { report.doubtfulRows.push({ row: item.row, role: "gerente_area" }); return; }
       const areaAssignment = { organization_id: organization.id, profile_id: areaProfile.id, role_id: roleByKey.get("gerente_area"), country_id: country.id, company_id: businessLine.company_id, operational_area_id: area.id, branch_id: null, business_line_id: null, business_line_code: null, status: "active", starts_at: new Date().toISOString(), metadata: { source: "ddddd2", source_row: item.row } };
       const { data: existingAreaAssignment } = await supabase.from("manager_assignments").select("id").eq("profile_id", areaProfile.id).eq("role_id", areaAssignment.role_id).eq("operational_area_id", area.id).eq("status", "active").maybeSingle();
@@ -157,9 +158,19 @@ if (apply) {
     const { error: slotError } = await supabase.from("directory_assignment_slots").upsert(slot, { onConflict: "organization_id,country_id,company_id,branch_id,business_line_id,role_key" });
     if (slotError) throw new Error("DIRECTORY_SLOT_UPSERT_FAILED");
     if (isVacancy(item.branchManager)) { report.updated += 1; return; }
-    const email = emailsByName.get(normal(item.branchManager));
-    const profile = profileByEmail.get(email) ?? profileByName.get(normal(item.branchManager)) ?? null;
-    if (!profile || !roleByKey.get("gerente_sucursal")) { report.doubtfulRows.push({ row: item.row, role: "gerente_sucursal" }); return; }
+    const key = assignmentKey(item.branch, item.branchManager);
+    const email = branchManagerEmails.emails.get(key) ?? null;
+    // A valid email on the matching workbook assignment is authoritative.
+    // Never substitute a profile found only by a shared display name.
+    const profile = email ? profileByEmail.get(email) ?? null : null;
+    if (!profile || !roleByKey.get("gerente_sucursal")) {
+      report.doubtfulRows.push({
+        row: item.row,
+        role: "gerente_sucursal",
+        reason: branchManagerEmails.ambiguous.has(key) ? "ambiguous_email_for_assignment" : email ? "email_profile_unresolved" : "pending_or_invalid_email",
+      });
+      return;
+    }
     const assignment = { organization_id: organization.id, profile_id: profile.id, role_id: roleByKey.get("gerente_sucursal"), country_id: country.id, company_id: businessLine.company_id, operational_area_id: area.id, branch_id: branch.id, business_line_id: businessLine.id, business_line_code: item.lineCode, status: "active", starts_at: new Date().toISOString(), metadata: { source: "ddddd2", source_row: item.row } };
     const { data: existing } = await supabase.from("manager_assignments").select("id").eq("profile_id", profile.id).eq("role_id", assignment.role_id).eq("branch_id", branch.id).eq("business_line_id", businessLine.id).maybeSingle();
     const result = existing ? await supabase.from("manager_assignments").update(assignment).eq("id", existing.id) : await supabase.from("manager_assignments").insert(assignment);

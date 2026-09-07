@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentAuthorizationActor } from "@/lib/server/authorization";
+import { resolveV7ActorFromCurrent } from "@/lib/v7/server/api-auth";
 
 export async function GET() {
   const actor = await getCurrentAuthorizationActor();
@@ -8,6 +9,13 @@ export async function GET() {
   if (!actor) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
+
+  const resolvedActor = await resolveV7ActorFromCurrent(actor);
+  const allowedBranches = Array.from(new Set(
+    (resolvedActor.scopeGrants ?? [])
+      .map((grant) => grant.branchId)
+      .filter((branchId): branchId is string => Boolean(branchId)),
+  ));
 
   return NextResponse.json({
     ok: true,
@@ -29,6 +37,8 @@ export async function GET() {
         organizationId: actor.scope.organizationId ?? null,
         organizationName: null,
       },
+      allowedBranches,
+      scopeGrants: resolvedActor.scopeGrants,
       userId: actor.userId,
     },
   });

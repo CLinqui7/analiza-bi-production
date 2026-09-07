@@ -35,6 +35,7 @@ type InviteUserRequest = {
   temporaryPassword?: unknown;
   roleKey?: unknown;
   scope?: unknown;
+  scopes?: unknown;
 };
 
 function isRoleKey(value: unknown): value is RoleKey {
@@ -259,6 +260,7 @@ export async function POST(request: Request) {
   if (!isRoleKey(payload?.roleKey)) {
     return jsonError("Selecciona un rol valido para la invitacion.", 400);
   }
+  const roleKey = payload.roleKey;
 
   const targetScope = readScope(payload?.scope);
 
@@ -266,7 +268,32 @@ export async function POST(request: Request) {
     return jsonError("El alcance de la invitacion no esta completo.", 400);
   }
 
-  const missingScopeError = getMissingScopeError(payload.roleKey, targetScope);
+  const requestedScopes = payload?.scopes === undefined
+    ? [targetScope]
+    : Array.isArray(payload.scopes)
+      ? payload.scopes.map(readScope)
+      : [];
+
+  if (
+    requestedScopes.length === 0 ||
+    requestedScopes.some((scope): scope is null => scope === null) ||
+    requestedScopes.some((scope) => scope && scope.organizationId !== targetScope.organizationId)
+  ) {
+    return jsonError("Los alcances de la invitacion no son validos.", 400);
+  }
+
+  const targetScopes = Array.from(
+    new Map(
+      (requestedScopes as ScopeBoundary[]).map((scope) => [
+        [scope.organizationId, scope.countryId, scope.companyId, scope.operationalAreaId, scope.branchId].join("|"),
+        scope,
+      ]),
+    ).values(),
+  );
+
+  const missingScopeError = targetScopes
+    .map((scope) => getMissingScopeError(roleKey, scope))
+    .find(Boolean);
 
   if (missingScopeError) {
     return jsonError(missingScopeError, 400);
@@ -329,6 +356,62 @@ export async function POST(request: Request) {
       .select("id,status")
       .ilike("email", email)
       .maybeSingle();
+
+    if (existingProfile && payload.roleKey === "gerente_sucursal") {
+      const existing = existingProfile as { id: string };
+      for (const scope of targetScopes) {
+        const { data: assignment } = await admin
+          .from("manager_assignments")
+          .select("id")
+          .eq("profile_id", existing.id)
+          .eq("role_id", role.id)
+          .eq("branch_id", scope.branchId ?? "")
+          .eq("status", "active")
+          .maybeSingle();
+        if (!assignment) {
+          const { error } = await admin.from("manager_assignments").insert({
+            organization_id: scope.organizationId,
+            profile_id: existing.id,
+            role_id: role.id,
+            country_id: scope.countryId ?? null,
+            company_id: scope.companyId ?? null,
+            operational_area_id: scope.operationalAreaId ?? null,
+            branch_id: scope.branchId ?? null,
+            status: "active",
+            starts_at: new Date().toISOString(),
+            metadata: { source: "usuarios-permisos-supabase" },
+          });
+          if (error) return jsonError("No se pudo agregar la sucursal al gerente existente.", 500);
+        }
+        const { data: branchManager } = await admin
+          .from("branch_managers")
+          .select("id")
+          .eq("profile_id", existing.id)
+          .eq("branch_id", scope.branchId ?? "")
+          .maybeSingle();
+        if (!branchManager && scope.branchId) {
+          const { error } = await admin.from("branch_managers").insert({
+            organization_id: scope.organizationId,
+            branch_id: scope.branchId,
+            profile_id: existing.id,
+            display_name: fullName,
+            email,
+            is_demo: false,
+            starts_on: new Date().toISOString().slice(0, 10),
+          });
+          if (error) return jsonError("No se pudo agregar la sucursal al gerente existente.", 500);
+        }
+      }
+      await admin.from("audit_logs").insert({
+        organization_id: targetScope.organizationId,
+        actor_user_id: uuidPattern.test(actor.userId) ? actor.userId : null,
+        action: "manager.assignments_updated",
+        entity_table: "profiles",
+        entity_id: existing.id,
+        metadata: { branch_count: targetScopes.length, source: "supabase_direct" },
+      });
+      return NextResponse.json({ ok: true, status: "assignments_updated" });
+    }
 
     if (existingProfile) {
       return jsonError(
@@ -434,6 +517,41 @@ export async function POST(request: Request) {
           if (branchManagerError) throw new Error(branchManagerError.message);
 
           await admin.rpc("activate_branch_if_ready", { target_branch_id: targetScope.branchId });
+        }
+
+        // One authenticated identity may hold several branch assignments.
+        // Keep the first scope as the profile default and add only grants for
+        // the remaining branches; do not create a second Auth user or bonus.
+        if (payload.roleKey === "gerente_sucursal") {
+          for (const scope of targetScopes.slice(1)) {
+            const { error: assignmentError } = await admin.from("manager_assignments").insert({
+              organization_id: scope.organizationId,
+              profile_id: newUserId,
+              role_id: role.id,
+              country_id: scope.countryId ?? null,
+              company_id: scope.companyId ?? null,
+              operational_area_id: scope.operationalAreaId ?? null,
+              branch_id: scope.branchId ?? null,
+              assigned_by: uuidPattern.test(actor.userId) ? actor.userId : null,
+              status: "active",
+              starts_at: new Date().toISOString(),
+              metadata: { source: "usuarios-permisos-supabase" },
+            });
+            if (assignmentError) throw new Error(assignmentError.message);
+            if (scope.branchId) {
+              const { error: branchManagerError } = await admin.from("branch_managers").insert({
+                organization_id: scope.organizationId,
+                branch_id: scope.branchId,
+                profile_id: newUserId,
+                display_name: fullName,
+                email,
+                is_demo: false,
+                starts_on: new Date().toISOString().slice(0, 10),
+              });
+              if (branchManagerError) throw new Error(branchManagerError.message);
+              await admin.rpc("activate_branch_if_ready", { target_branch_id: scope.branchId });
+            }
+          }
         }
 
         if (managerIncentiveResult.incentive && managementCategory) {
