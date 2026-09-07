@@ -32,20 +32,63 @@ const count = (predicate) => rows.filter(predicate).length;
 const countryIds = [...new Set(rows.map((row) => row.country_id))];
 const lineIds = [...new Set(rows.map((row) => row.business_line_id))];
 const branchIds = [...new Set(rows.map((row) => row.branch_id))];
-const [{ data: countries }, { data: lines }, { data: managers }, { data: branches }, { data: roles }, { data: branchManagers }] = await Promise.all([
+const [{ data: countries }, { data: lines }, { data: managers }, { data: branches }, { data: roles }, { data: branchManagers }, { data: profiles }, { data: userRoles }, { data: bonusPlans }, { data: authUsers }] = await Promise.all([
   supabase.from("countries").select("id,iso2").in("id", countryIds),
   supabase.from("business_lines").select("id,code").in("id", lineIds),
-  supabase.from("manager_assignments").select("profile_id,role_id,operational_area_id,branch_id,status,metadata").eq("organization_id", organization.id).eq("status", "active"),
-  supabase.from("branches").select("id,country_id").in("id", branchIds),
+  supabase.from("manager_assignments").select("profile_id,role_id,operational_area_id,branch_id,business_line_id,status,metadata").eq("organization_id", organization.id).eq("status", "active"),
+  supabase.from("branches").select("id,country_id,name").eq("organization_id", organization.id),
   supabase.from("roles").select("id,key"),
   supabase.from("branch_managers").select("profile_id,branch_id").eq("organization_id", organization.id).eq("is_demo", false).in("branch_id", branchIds),
+  supabase.from("profiles").select("id,email").eq("organization_id", organization.id),
+  supabase.from("user_roles").select("user_id,role_id,branch_id,status").eq("organization_id", organization.id).eq("status", "active"),
+  supabase.from("manager_bonus_plans").select("profile_id,branch_id,status").eq("organization_id", organization.id).eq("status", "active"),
+  supabase.auth.admin.listUsers({ page: 1, perPage: 1000 }),
 ]);
 const countryById = new Map((countries ?? []).map((country) => [country.id, country.iso2]));
 const lineById = new Map((lines ?? []).map((line) => [line.id, line.code]));
 const branchCountryById = new Map((branches ?? []).map((branch) => [branch.id, branch.country_id]));
+const branchNameById = new Map((branches ?? []).map((branch) => [branch.id, branch.name]));
 const roleById = new Map((roles ?? []).map((role) => [role.id, role.key]));
+const profilesByEmail = new Map((profiles ?? []).map((profile) => [profile.email?.toLowerCase(), profile]));
 const directoryAreaIds = new Set(rows.map((row) => row.operational_area_id).filter(Boolean));
 const isDirectoryAssignment = (manager) => manager.metadata && typeof manager.metadata === "object" && manager.metadata.source === "ddddd2";
+const branchManagerAssignments = (managers ?? []).filter((manager) =>
+  roleById.get(manager.role_id) === "gerente_sucursal" && manager.branch_id,
+);
+const branchAssignmentsByProfile = new Map();
+for (const assignment of branchManagerAssignments) {
+  const profileAssignments = branchAssignmentsByProfile.get(assignment.profile_id) ?? [];
+  profileAssignments.push(assignment);
+  branchAssignmentsByProfile.set(assignment.profile_id, profileAssignments);
+}
+const multiBranchProfileIds = [...branchAssignmentsByProfile.entries()]
+  .filter(([, assignments]) => new Set(assignments.map((assignment) => assignment.branch_id)).size > 1)
+  .map(([profileId]) => profileId);
+const authUserIds = new Set((authUsers?.users ?? []).map((user) => user.id));
+const activeManagerRoleId = [...roleById.entries()].find(([, key]) => key === "gerente_sucursal")?.[0];
+const expectedIdentityAssignments = [
+  ["felipe.duran@labanaliza.com", "Sta Ana - Santa Ana 2 - L013"],
+  ["andrea.rivera@labanaliza.com", "Sta Ana - Santa Ana 2 Fisioterapia"],
+];
+for (const [email, branchName] of expectedIdentityAssignments) {
+  const profile = profilesByEmail.get(email);
+  assert.ok(profile, "DIRECTORY_EMAIL_IDENTITY_MISSING");
+  const assignments = branchAssignmentsByProfile.get(profile.id) ?? [];
+  assert.equal(assignments.filter((assignment) => branchNameById.get(assignment.branch_id) === branchName).length, 1, "DIRECTORY_EMAIL_IDENTITY_CROSSED");
+}
+assert.notEqual(
+  profilesByEmail.get("felipe.duran@labanaliza.com")?.id,
+  profilesByEmail.get("andrea.rivera@labanaliza.com")?.id,
+  "DIRECTORY_EMAIL_IDENTITIES_MERGED",
+);
+assert.equal(multiBranchProfileIds.length, 11, "DIRECTORY_MULTI_BRANCH_MANAGER_COUNT_INVALID");
+for (const profileId of multiBranchProfileIds) {
+  const profile = (profiles ?? []).find((item) => item.id === profileId);
+  assert.ok(profile?.email, "DIRECTORY_MULTI_BRANCH_EMAIL_MISSING");
+  assert.ok(authUserIds.has(profileId), "DIRECTORY_MULTI_BRANCH_AUTH_MISSING");
+  assert.ok((userRoles ?? []).some((role) => role.user_id === profileId && role.role_id === activeManagerRoleId), "DIRECTORY_MULTI_BRANCH_ROLE_MISSING");
+  assert.equal((bonusPlans ?? []).filter((plan) => plan.profile_id === profileId).length, 1, "DIRECTORY_MULTI_BRANCH_BONUS_DUPLICATED");
+}
 const metrics = {
   assignmentSlots: rows.length,
   es: count((row) => countryById.get(row.country_id) === "SV" || countryById.get(row.country_id) === "ES"),
@@ -58,6 +101,7 @@ const metrics = {
   crossCountry: count((row) => branchCountryById.get(row.branch_id) !== row.country_id),
   areaManagers: new Set((managers ?? []).filter((manager) => isDirectoryAssignment(manager) && roleById.get(manager.role_id) === "gerente_area" && directoryAreaIds.has(manager.operational_area_id)).map((manager) => manager.profile_id)).size,
   branchManagers: new Set((branchManagers ?? []).filter((manager) => rows.some((row) => row.branch_id === manager.branch_id && row.status === "filled") && manager.profile_id).map((manager) => manager.profile_id)).size,
+  multiBranchManagers: multiBranchProfileIds.length,
 };
 
 assert.equal(metrics.assignmentSlots, 95, "DIRECTORY_ASSIGNMENT_SLOTS_INVALID");

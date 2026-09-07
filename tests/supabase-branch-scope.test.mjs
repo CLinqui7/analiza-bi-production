@@ -8,6 +8,8 @@ const sessionRoute = read("app/api/auth/session/route.ts");
 const supabaseAccess = read("lib/server/supabase-user-access.ts");
 const tenantHeader = read("components/tenant-context-header.tsx");
 const branchDashboard = read("components/branch-network-dashboard.tsx");
+const contextPage = read("app/protected/context/page.tsx");
+const officialContext = read("lib/server/official-context-options.ts");
 
 assert.ok(
   currentAccess.includes('fetch("/api/auth/session"'),
@@ -81,6 +83,14 @@ for (const expected of [
 assert.ok(
   !branchDashboard.includes("screen.records.slice(0, 1)"),
   "Branch dashboard must not fabricate branch scope by slicing the full network.",
+);
+
+assert.ok(
+  contextPage.includes("resolveV7ActorFromCurrent") &&
+    contextPage.includes("scopeGrants: v7Access?.scopeGrants") &&
+    officialContext.includes("scopeGrantsFor") &&
+    officialContext.includes("grantMatchesOfficialBranch"),
+  "Official context must preserve every server-authorized branch grant.",
 );
 
 const { filterBranchesByScope } = await import(

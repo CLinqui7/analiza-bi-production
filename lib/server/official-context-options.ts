@@ -57,6 +57,18 @@ type OfficialManagerRow = {
   name: string;
 };
 
+type AuthorizedScopeGrant = {
+  branchId?: string | null;
+  companyId?: string | null;
+  countryId?: string | null;
+  operationalAreaId?: string | null;
+  organizationId: string;
+};
+
+type OfficialContextActor = AuthorizationActor & {
+  scopeGrants?: AuthorizedScopeGrant[];
+};
+
 export type OfficialManagerOption = {
   id: string;
   name: string;
@@ -95,6 +107,28 @@ function lineCodeForUnitType(unitType: CompanyOption["unitType"]) {
 
 export function canReadAllOfficialContext(actor: AuthorizationActor) {
   return unrestrictedOfficialContextRoles.has(actor.roleKey);
+}
+
+function scopeGrantsFor(actor: OfficialContextActor) {
+  return actor.scopeGrants && actor.scopeGrants.length > 0
+    ? actor.scopeGrants
+    : [actor.scope];
+}
+
+export function grantMatchesOfficialBranch(
+  grant: AuthorizedScopeGrant,
+  branch: Pick<OfficialBranchRow, "id" | "company_id" | "country_id"> & {
+    operational_area_id?: string | null;
+    organization_id?: string;
+  },
+) {
+  return (
+    (!branch.organization_id || grant.organizationId === branch.organization_id)
+    && (!grant.countryId || grant.countryId === branch.country_id)
+    && (!grant.companyId || grant.companyId === branch.company_id)
+    && (!grant.operationalAreaId || grant.operationalAreaId === branch.operational_area_id)
+    && (!grant.branchId || grant.branchId === branch.id)
+  );
 }
 
 export function buildOfficialBranchAccessPredicate(actor: AuthorizationActor) {
@@ -299,7 +333,7 @@ function buildOfficialOptions({
 }
 
 async function getOfficialContextOptionsFromSupabase(
-  actor: AuthorizationActor,
+  actor: OfficialContextActor,
 ): Promise<OfficialContextOptions> {
   const admin = getSupabaseAdminClient();
 
@@ -358,25 +392,12 @@ async function getOfficialContextOptionsFromSupabase(
       ),
     );
 
+    const grants = scopeGrantsFor(actor);
     branchRows = branchRows.filter((branch) => {
-      if (actor.scope.branchId) {
-        return branch.id === actor.scope.branchId;
-      }
-
-      const countryMatches =
-        !actor.scope.countryId || branch.country_id === actor.scope.countryId;
-      const companyMatches =
-        !actor.scope.companyId || branch.company_id === actor.scope.companyId;
-      const areaMatches =
-        !actor.scope.operationalAreaId ||
-        branch.operational_area_id === actor.scope.operationalAreaId;
       const explicitMatches =
-        explicitBranchIds.size === 0 && explicitCompanyIds.size === 0
-          ? true
-          : explicitBranchIds.has(branch.id) ||
-            explicitCompanyIds.has(branch.company_id);
+        explicitBranchIds.has(branch.id) || explicitCompanyIds.has(branch.company_id);
 
-      return countryMatches && companyMatches && areaMatches && explicitMatches;
+      return explicitMatches || grants.some((grant) => grantMatchesOfficialBranch(grant, branch));
     });
   }
 
@@ -507,7 +528,7 @@ async function getOfficialContextOptionsFromSupabase(
 }
 
 export async function getOfficialContextOptions(
-  actor: AuthorizationActor,
+  actor: OfficialContextActor,
 ): Promise<OfficialContextOptions> {
   return getOfficialContextOptionsFromSupabase(actor);
 }

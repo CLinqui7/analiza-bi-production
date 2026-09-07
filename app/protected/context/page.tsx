@@ -3,6 +3,7 @@ import { Suspense } from "react";
 import { ContextSelectionForm } from "@/components/context-selection-form";
 import { requireProtectedPath } from "@/lib/server/authorization";
 import { getOfficialContextOptions } from "@/lib/server/official-context-options";
+import { resolveV7ActorFromCurrent } from "@/lib/v7/server/api-auth";
 import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
 import {
   demoBranches,
@@ -14,6 +15,9 @@ import {
 async function ContextSelectionGate() {
   const access = await requireProtectedPath("/protected/context");
   const isDemoEnvironment = isDemoRuntimeEnvironment();
+  const v7Access = isDemoEnvironment
+    ? null
+    : await resolveV7ActorFromCurrent(access);
   const options = isDemoEnvironment
     ? {
         branches: demoBranches,
@@ -21,7 +25,10 @@ async function ContextSelectionGate() {
         companies: demoCompanyOptions,
         countries: demoCountryOptions,
       }
-    : await getOfficialContextOptions(access);
+    : await getOfficialContextOptions({
+        ...access,
+        scopeGrants: v7Access?.scopeGrants,
+      });
 
   return (
     <ContextSelectionForm
