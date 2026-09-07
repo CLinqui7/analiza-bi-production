@@ -96,9 +96,9 @@ for (const calculatedColumn of [
 assert.ok(
   service.includes("business_line = 'LABORATORY'") &&
     service.includes("co.unit_type = 'laboratorio'") &&
-    service.includes("getMissingDatabaseConfig().length === 0") &&
-    service.includes("isDemoRuntimeEnvironment"),
-  "Laboratory service must avoid direct PostgreSQL when only Supabase V7 is configured.",
+    service.includes("return false;") &&
+    !service.includes('from "pg"'),
+  "Laboratory service must keep the direct PostgreSQL adapter disabled.",
 );
 
 for (const clinicalKpi of [

@@ -55,3 +55,9 @@ components/deploy-button.tsx
 docs/deployment-vercel.md
 docs/screenshots/
 tests/postgres-rls-runtime.test.mjs
+/dist/
+.vinext/
+.wrangler/
+
+.vercel
+.env*

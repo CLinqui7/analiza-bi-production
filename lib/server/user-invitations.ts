@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import type { PoolClient } from "pg";
+import type { RetiredDatabaseClient as PoolClient } from "@/lib/server/database";
 
 import { getPostgresPool } from "@/lib/server/database";
 import { demoRoleProfiles, type RoleKey } from "@/lib/tenant/demo-context";

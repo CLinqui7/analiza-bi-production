@@ -12,9 +12,6 @@ import {
   isDemoRoleSwitchEnabled,
 } from "@/lib/auth/demo-admin";
 import { getDemoScopeForRole } from "@/lib/auth/demo-scope";
-import { readLocalSession } from "@/lib/auth/local-session";
-import { getMissingDatabaseConfig } from "@/lib/server/database";
-import { getAuthenticatedLocalUserAccess } from "@/lib/server/local-auth";
 import { getSupabaseDirectoryUserAccess } from "@/lib/server/supabase-user-access";
 import { createClient } from "@/lib/supabase/server";
 import type { CurrentUserScope } from "@/lib/tenant/current-user-access";
@@ -101,45 +98,6 @@ async function getCookieSource(cookieSource?: CookieSource) {
   return cookieSource ?? (await cookies());
 }
 
-async function readLocalAuthorizationActor(
-  cookieSource: CookieSource,
-): Promise<AuthorizationActor | null> {
-  const localSession = (() => {
-    try {
-      return readLocalSession(cookieSource);
-    } catch {
-      return null;
-    }
-  })();
-
-  if (!localSession) {
-    return null;
-  }
-
-  if (getMissingDatabaseConfig().length > 0) {
-    return null;
-  }
-
-  const user = await getAuthenticatedLocalUserAccess(localSession.userId).catch(
-    () => null,
-  );
-  const scope = user?.scope ? toScopeBoundary(user.scope) : null;
-
-  if (!user || !scope) {
-    return null;
-  }
-
-  return {
-    allowDemoRoleSwitch: false,
-    email: user.email,
-    requiresPasswordChange: user.requiresPasswordChange,
-    roleKey: user.roleKey,
-    scope,
-    source: "local",
-    userId: user.userId,
-  };
-}
-
 function readDemoAuthorizationActor(
   cookieSource: CookieSource,
 ): AuthorizationActor | null {
@@ -189,37 +147,8 @@ async function readSupabaseAuthorizationActor(): Promise<AuthorizationActor | nu
     return null;
   }
 
-  // Production bridge: the previous Analiza backend stores the real role and
-  // organizational scope in PostgreSQL tables. When the same Supabase database
-  // is configured through DATABASE_URL/POSTGRES_URL, prefer that authoritative
-  // scope instead of relying on optional JWT metadata. This preserves the
-  // existing production users, branches and permissions without re-importing
-  // them into a second authentication system.
-  if (getMissingDatabaseConfig().length === 0) {
-    const databaseUser = await getAuthenticatedLocalUserAccess(userId).catch(
-      () => null,
-    );
-    const databaseScope = databaseUser?.scope
-      ? toScopeBoundary(databaseUser.scope)
-      : null;
-
-    if (databaseUser && databaseScope) {
-      return {
-        allowDemoRoleSwitch: false,
-        email: databaseUser.email,
-        requiresPasswordChange: databaseUser.requiresPasswordChange,
-        roleKey: databaseUser.roleKey,
-        scope: databaseScope,
-        source: "supabase",
-        userId,
-      };
-    }
-  }
-
-  // The previous production backend already contains the user directory in
-  // Supabase. If direct PostgreSQL is not configured yet, resolve role and
-  // scope with the server-only service-role client instead of downgrading every
-  // existing user to viewer.
+  // Resolve roles and organizational scope from the existing Supabase
+  // directory. Authorization never depends on a second PostgreSQL connection.
   const directoryUser = await getSupabaseDirectoryUserAccess(
     userId,
     readString(claims.email) ?? "supabase-user",
@@ -241,7 +170,7 @@ async function readSupabaseAuthorizationActor(): Promise<AuthorizationActor | nu
   }
 
   // Compatibility fallback for environments that only have Supabase Auth
-  // configured. This keeps login operational while DATABASE_URL is being wired.
+  // configured. Scoped server data always takes precedence when available.
   return {
     allowDemoRoleSwitch: false,
     email: readString(claims.email) ?? "supabase-user",
@@ -256,12 +185,6 @@ export async function getCurrentAuthorizationActor(
   cookieSource?: CookieSource,
 ) {
   const resolvedCookieSource = await getCookieSource(cookieSource);
-  const localActor = await readLocalAuthorizationActor(resolvedCookieSource);
-
-  if (localActor) {
-    return localActor;
-  }
-
   const demoActor = readDemoAuthorizationActor(resolvedCookieSource);
 
   if (demoActor) {

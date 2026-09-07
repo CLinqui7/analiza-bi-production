@@ -33,12 +33,10 @@ assert.ok(
 );
 
 assert.ok(
-  database.includes("assertSafePostgresRuntimeRole") &&
-    database.includes("rolbypassrls") &&
-    database.includes("rolsuper") &&
-    database.includes("request.jwt.claim.sub") &&
-    database.includes("set local role"),
-  "PostgreSQL access must verify no bypassrls/superuser and set user context for RLS.",
+  database.includes("productive data plane is Supabase") &&
+    !database.includes('from "pg"') &&
+    !database.includes("new Pool"),
+  "Productive access must not include a direct PostgreSQL client.",
 );
 
 assert.ok(

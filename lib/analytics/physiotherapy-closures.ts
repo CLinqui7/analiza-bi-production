@@ -1,16 +1,7 @@
-import type { PoolClient } from "pg";
-
-import {
-  getMissingDatabaseConfig,
-  getPostgresPool,
-  withPostgresRlsContext,
-} from "../server/database.ts";
-import { assertBranchReadyForOperationalData } from "../server/branch-governance.ts";
 import {
   canPerformAction,
   type AuthorizationActor,
 } from "../security/authorization-policy.ts";
-import { isDemoRuntimeEnvironment } from "../security/environment.ts";
 import {
   demoBranches,
   demoCompanies,
@@ -20,6 +11,18 @@ import {
   type BranchOption,
 } from "../tenant/demo-context.ts";
 import type { ScopeBoundary } from "../tenant/delegation-policy.ts";
+
+// Kept only to type retired migration code below.  Productive requests use
+// the Supabase monthly-submission boundary and never open a database socket.
+type RetiredStorageClient = {
+  query<T>(statement: string, parameters?: readonly unknown[]): Promise<{ rows: T[] }>;
+};
+type PoolClient = RetiredStorageClient;
+
+async function assertBranchReadyForOperationalData(...args: unknown[]): Promise<void> {
+  void args;
+  throw new Error("El adaptador de cierres anterior fue retirado; usa Supabase.");
+}
 
 export type PhysiotherapyClosureStatus =
   | "draft"
@@ -2553,42 +2556,27 @@ const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function shouldUsePostgresPersistence() {
-  // Supabase V7 is the production persistence boundary. The retired direct
-  // PostgreSQL adapter remains available only for installations that still
-  // deliberately configure a server-side connection string during migration.
-  return !isDemoRuntimeEnvironment() && getMissingDatabaseConfig().length === 0;
+  return false;
 }
 
-function ensurePostgresPersistenceConfigured() {
-  const missingConfig = getMissingDatabaseConfig();
-
-  if (missingConfig.length > 0) {
-    throw new Error(
-      `PostgreSQL no esta configurado para persistencia real: ${missingConfig.join(", ")}.`,
-    );
-  }
+function ensurePostgresPersistenceConfigured(): never {
+  throw new Error("El adaptador de cierres anterior fue retirado; usa Supabase.");
 }
 
 async function withPostgresClient<T>(
   actor: AuthorizationActor,
-  work: (client: PoolClient) => Promise<T>,
-) {
+  work: (client: RetiredStorageClient) => Promise<T>,
+): Promise<T> {
   ensurePostgresPersistenceConfigured();
-
-  const pool = getPostgresPool();
-  const client = await pool.connect();
-
-  try {
-    return await withPostgresRlsContext(client, actor, () => work(client));
-  } finally {
-    client.release();
-  }
+  void actor;
+  void work;
+  throw new Error("El adaptador de cierres anterior fue retirado; usa Supabase.");
 }
 
 async function withPostgresTransaction<T>(
   actor: AuthorizationActor,
-  work: (client: PoolClient) => Promise<T>,
-) {
+  work: (client: RetiredStorageClient) => Promise<T>,
+): Promise<T> {
   return withPostgresClient(actor, work);
 }
 

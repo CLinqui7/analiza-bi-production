@@ -76,7 +76,13 @@ export async function updateSession(request: NextRequest) {
     !hasLocalSession &&
     !isPublicAuthPath
   ) {
-    // no user, potentially respond by redirecting the user to the login page
+    if (request.nextUrl.pathname.startsWith("/api/")) {
+      return NextResponse.json(
+        { error: "UNAUTHORIZED", ok: false },
+        { status: 401 },
+      );
+    }
+
     const url = request.nextUrl.clone();
     url.pathname = "/auth/login";
     return NextResponse.redirect(url);

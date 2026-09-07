@@ -7,7 +7,7 @@ import {
   type AuthorizationActor,
 } from "../security/authorization-policy.ts";
 import type { ScopeBoundary } from "../tenant/delegation-policy.ts";
-import type { PoolClient } from "pg";
+import type { RetiredDatabaseClient as PoolClient } from "@/lib/server/database";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

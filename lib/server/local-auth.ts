@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import type { PoolClient } from "pg";
+import type { RetiredDatabaseClient as PoolClient } from "@/lib/server/database";
 
 import {
   getPostgresPool,

@@ -89,7 +89,8 @@ assert.doesNotMatch(officialBi, /getMissingDatabaseConfig/);
 
 const officialContext = read("lib/server/official-context-options.ts");
 assert.match(officialContext, /getOfficialContextOptionsFromSupabase/);
-assert.match(officialContext, /if \(getMissingDatabaseConfig\(\)\.length > 0\)/);
+assert.match(officialContext, /return getOfficialContextOptionsFromSupabase\(actor\)/);
+assert.doesNotMatch(officialContext, /getMissingDatabaseConfig|from "pg"|getPostgresPool/);
 
 for (const api of [
   "app/api/users/branch-managers/route.ts",

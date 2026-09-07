@@ -10,9 +10,6 @@ import {
 } from "@/lib/data-ingestion/templates";
 import { requireProtectedAccess } from "@/lib/server/authorization";
 import { canPerformAction } from "@/lib/security/authorization-policy";
-import { assertScopedBranchReadyForOperationalData } from "@/lib/server/branch-governance";
-import { getMissingDatabaseConfig } from "@/lib/server/database";
-import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
 
 function readFormString(formData: FormData, key: string) {
   const value = formData.get(key);
@@ -85,12 +82,14 @@ export async function POST(request: Request) {
   const buffer = Buffer.from(await fileValue.arrayBuffer());
 
   try {
-    if (!isDemoRuntimeEnvironment() && getMissingDatabaseConfig().length === 0) {
-      await assertScopedBranchReadyForOperationalData({
-        actor,
-        branchId: scope.branchId,
-        operationLabel: "cargar importaciones",
-      });
+    if (actor.scope.branchId && scope.branchId && scope.branchId !== actor.scope.branchId) {
+      return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
+    }
+    if (actor.scope.countryId && scope.countryId && scope.countryId !== actor.scope.countryId) {
+      return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
+    }
+    if (actor.scope.companyId && scope.companyId && scope.companyId !== actor.scope.companyId) {
+      return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
     }
 
     const result = ingestTabularFile({

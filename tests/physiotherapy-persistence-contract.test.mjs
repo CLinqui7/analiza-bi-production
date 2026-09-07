@@ -102,12 +102,12 @@ for (const insightField of [
 
 assert.ok(
   analytics.includes("function shouldUsePostgresPersistence()") &&
-    analytics.includes("getMissingDatabaseConfig().length === 0"),
-  "The legacy PostgreSQL adapter must be disabled when Supabase V7 is the only configured runtime.",
+    analytics.includes("return false;"),
+  "The legacy PostgreSQL adapter must be unconditionally disabled.",
 );
 assert.ok(
-  analytics.includes("getPostgresPool"),
-  "Physiotherapy persistence must use the server-side PostgreSQL pool.",
+  !analytics.includes('from "pg"') && !analytics.includes("getPostgresPool"),
+  "Physiotherapy closure code must not import or open a direct PostgreSQL pool.",
 );
 assert.ok(
   analytics.includes("saveDemoPhysiotherapyClosureDraft") &&
