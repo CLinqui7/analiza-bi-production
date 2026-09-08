@@ -4,6 +4,11 @@ import {
   type ManualMonthlyFormField,
   type ManualMonthlyFormStep,
 } from "@/lib/analytics/import-operations";
+import {
+  isBlankMonthlyValue,
+  isNonNegativeCountId,
+  numericMonthlyValue,
+} from "@/lib/monthly-form-values";
 
 export type BusinessLineCatalogLike = {
   code?: string | null;
@@ -51,21 +56,8 @@ export function getMonthlyFileFields(line: ImportBusinessLine) {
   return getMonthlyFormFields(line).filter((field) => field.inputType === "file");
 }
 
-function isBlank(value: unknown) {
-  return value === null || value === undefined || (typeof value === "string" && value.trim() === "");
-}
-
-function numericValue(value: unknown) {
-  if (typeof value === "number" && Number.isFinite(value)) return value;
-  if (typeof value === "string" && value.trim() !== "") {
-    const parsed = Number(value);
-    if (Number.isFinite(parsed)) return parsed;
-  }
-  return null;
-}
-
 function isNonNegativeCountField(field: ManualMonthlyFormField) {
-  return field.inputType === "number" && field.min === 0 && /(?:count|visit)/.test(field.id);
+  return isNonNegativeCountId(field.id, field.inputType, field.min);
 }
 
 export type FormContractValidation = {
@@ -94,13 +86,13 @@ export function validateMonthlyFormContract({
 
   for (const field of fields) {
     const raw = responses[field.id];
-    if (isBlank(raw)) {
+    if (isBlankMonthlyValue(raw)) {
       if (requireComplete && field.required) missing.push(field.id);
       continue;
     }
 
     if (["number", "currency", "percent"].includes(field.inputType)) {
-      const parsed = numericValue(raw);
+      const parsed = numericMonthlyValue(raw);
       if (parsed === null) {
         invalid.push({ fieldId: field.id, reason: "NOT_A_NUMBER" });
         continue;
@@ -133,6 +125,6 @@ export function validateMonthlyFormContract({
 
 export function countRequiredCompletion(line: ImportBusinessLine, responses: Record<string, unknown>) {
   const required = getRequiredMonthlyResponseFields(line);
-  const completed = required.filter((field) => !isBlank(responses[field.id])).length;
+  const completed = required.filter((field) => !isBlankMonthlyValue(responses[field.id])).length;
   return { completed, total: required.length };
 }

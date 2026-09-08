@@ -1,6 +1,7 @@
 import "server-only";
 
 import { NextResponse } from "next/server";
+import { cache } from "react";
 
 import { getCurrentAuthorizationActor } from "@/lib/server/authorization";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
@@ -24,7 +25,7 @@ export function toV7Actor(
 }
 
 
-export async function resolveV7ActorFromCurrent(
+async function resolveV7ActorFromCurrentUncached(
   actor: NonNullable<Awaited<ReturnType<typeof getCurrentAuthorizationActor>>>,
 ): Promise<Actor> {
   const base = toV7Actor(actor);
@@ -104,6 +105,9 @@ export async function resolveV7ActorFromCurrent(
     scopeGrants: distinctScopeGrants.length > 0 ? distinctScopeGrants : base.scopeGrants,
   };
 }
+
+/** Request-scoped actor/grant resolution; never a process-wide permission cache. */
+export const resolveV7ActorFromCurrent = cache(resolveV7ActorFromCurrentUncached);
 
 export async function actorForApi(
   action?: ActionKey,

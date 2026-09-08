@@ -159,13 +159,16 @@ export async function getSupabaseDirectoryUserAccess(
 
   if (!admin) return null;
 
-  const profileResult = await admin
-    .from("profiles")
-    .select(
-      "id, email, status, organization_id, default_country_id, default_company_id, default_branch_id",
-    )
-    .eq("id", userId)
-    .maybeSingle();
+  const [profileResult, assignments] = await Promise.all([
+    admin
+      .from("profiles")
+      .select(
+        "id, email, status, organization_id, default_country_id, default_company_id, default_branch_id",
+      )
+      .eq("id", userId)
+      .maybeSingle(),
+    readUserRoles(userId),
+  ]);
 
   if (profileResult.error || !profileResult.data) {
     return null;
@@ -177,7 +180,6 @@ export async function getSupabaseDirectoryUserAccess(
     return null;
   }
 
-  const assignments = await readUserRoles(userId);
   const roleIds = Array.from(new Set(assignments.map((item) => item.role_id)));
   const rolesResult = roleIds.length
     ? await admin.from("roles").select("id, key").in("id", roleIds)

@@ -29,6 +29,14 @@ import {
   getMonthlyFormSteps,
   resolveFormBusinessLine,
 } from "@/lib/monthly-form-contract";
+import {
+  copyMonthlyDraft,
+  emptyMonthlyDraft,
+  hasMonthlyDraftContent,
+  monthlyDraftKey,
+  shouldApplyMonthlyResponse,
+  type MonthlyFormDraft,
+} from "@/lib/monthly-form-drafts";
 import type { TenantContextOptions } from "@/lib/v7/server/tenant-context";
 
 const acceptedFiles = ".xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg";
@@ -91,6 +99,7 @@ const contextFieldIds = new Set([
 ]);
 
 type SavedVersion = { id: string; version_number: number; status: string; created_at: string };
+type SavedSubmission = { submissionId: string; versionId: string; versionNumber: number; status: string };
 type ApiResult = {
   submissionId?: string;
   version?: SavedVersion;
@@ -389,7 +398,7 @@ export function MonthlySubmissionCenter({
   const [periodMonth, setPeriodMonth] = useState(options.reportingMonths[0]?.id ?? monthValue());
   const [values, setValues] = useState<Record<string, string>>({});
   const [changeReason, setChangeReason] = useState(changeReasonOptions[0]!);
-  const [saved, setSaved] = useState<{ submissionId: string; versionId: string; versionNumber: number; status: string } | null>(null);
+  const [saved, setSaved] = useState<SavedSubmission | null>(null);
   const [dirty, setDirty] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -401,6 +410,8 @@ export function MonthlySubmissionCenter({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [blockers, setBlockers] = useState<string[]>([]);
   const contextRevisionRef = useRef(0);
+  const activeContextKeyRef = useRef(monthlyDraftKey(assignments[0]?.id ?? "", options.reportingMonths[0]?.id ?? monthValue()));
+  const draftsRef = useRef(new Map<string, MonthlyFormDraft<SavedSubmission, Attachment>>());
 
   const selectedBranch = selectedAssignment?.branch ?? null;
   const selectedBranchManager = selectedAssignment?.branchManager ?? null;
@@ -502,56 +513,101 @@ export function MonthlySubmissionCenter({
     if (currentStep > steps.length) setCurrentStep(steps.length);
   }, [currentStep, steps.length]);
 
-  function markContextChange() {
+  function activeDraft() {
+    return copyMonthlyDraft({
+      attachments,
+      blockers,
+      changeReason,
+      currentStep,
+      dirty,
+      saved,
+      values,
+      warnings,
+    });
+  }
+
+  function storeActiveDraft() {
+    draftsRef.current.set(activeContextKeyRef.current, activeDraft());
+  }
+
+  function applyDraft(draft: MonthlyFormDraft<SavedSubmission, Attachment>) {
+    setAttachments(draft.attachments);
+    setBlockers(draft.blockers);
+    setChangeReason(draft.changeReason);
+    setCurrentStep(draft.currentStep);
+    setDirty(draft.dirty);
+    setSaved(draft.saved);
+    setValues(draft.values);
+    setWarnings(draft.warnings);
+  }
+
+  function markContextChange(nextContextKey: string) {
     contextRevisionRef.current += 1;
-    setSaved(null);
-    setAttachments([]);
-    setDirty(true);
-    setCurrentStep(0);
+    activeContextKeyRef.current = nextContextKey;
     setMessage(null);
+  }
+
+  function switchDraft(nextAssignmentId: string, nextPeriodMonth: string) {
+    storeActiveDraft();
+    const nextKey = monthlyDraftKey(nextAssignmentId, nextPeriodMonth);
+    markContextChange(nextKey);
+    applyDraft(copyMonthlyDraft(
+      draftsRef.current.get(nextKey)
+      ?? emptyMonthlyDraft<SavedSubmission, Attachment>(changeReasonOptions[0]!),
+    ));
   }
 
   function changeAssignment(next: string) {
     const assignment = assignments.find((item) => item.id === next);
     if (!assignment) return;
-    if (dirty && (saved || Object.values(values).some((value) => value.trim() !== "")) && !window.confirm("Tienes cambios sin guardar. Cambiar de asignación los conservará separados, pero no los trasladará. ¿Continuar?")) return;
+    if (dirty && (saved || hasMonthlyDraftContent(values)) && !window.confirm("Tienes cambios sin guardar. Se conservarán separados en esta sesión y no se trasladarán a la otra asignación. ¿Continuar?")) return;
     setAssignmentId(next);
     setCountryId(assignment.country.id);
     setCompanyId(assignment.company.id);
     setOperationalAreaId(assignment.operationalArea?.id ?? "");
     setBranchId(assignment.branch.id);
     setBusinessLineId(assignment.businessLine.id);
-    setValues({});
-    markContextChange();
+    switchDraft(next, periodMonth);
   }
 
   function changePeriod(next: string) {
-    if (dirty && (saved || Object.values(values).some((value) => value.trim() !== "")) && !window.confirm("Tienes cambios sin guardar. Cambiar de mes no los trasladará. ¿Continuar?")) return;
+    if (dirty && (saved || hasMonthlyDraftContent(values)) && !window.confirm("Tienes cambios sin guardar. Se conservarán separados en esta sesión y no se trasladarán al otro mes. ¿Continuar?")) return;
     setPeriodMonth(next);
-    markContextChange();
+    switchDraft(assignmentId, next);
   }
 
   function changeField(fieldId: string, value: string) {
+    contextRevisionRef.current += 1;
     setValues((current) => ({ ...current, [fieldId]: value }));
     setDirty(true);
     setMessage(null);
   }
 
-  async function loadAttachments(submissionId: string, versionId: string) {
+  async function loadAttachments(
+    submissionId: string,
+    versionId: string,
+    requestContextKey = activeContextKeyRef.current,
+    requestRevision = contextRevisionRef.current,
+  ) {
     const response = await fetch(`/api/monthly-submissions/${submissionId}/attachments?versionId=${encodeURIComponent(versionId)}`, { cache: "no-store" });
     const body = (await response.json()) as { items?: Attachment[] };
-    if (response.ok) setAttachments(body.items ?? []);
+    if (response.ok && shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) {
+      setAttachments(body.items ?? []);
+    }
   }
 
   async function openSubmission(submissionId: string) {
     const contextRevision = contextRevisionRef.current;
+    const requestContextKey = activeContextKeyRef.current;
+    let completionContextKey = requestContextKey;
+    let completionRevision = contextRevision;
     setBusy("open");
     setMessage(null);
     try {
       const response = await fetch(`/api/monthly-submissions?submissionId=${encodeURIComponent(submissionId)}`, { cache: "no-store" });
       const body = (await response.json()) as SubmissionDetail;
       if (!response.ok || !body.submission || !body.version) throw new Error(body.error ?? "No se pudo abrir el cierre.");
-      if (contextRevision !== contextRevisionRef.current) return;
+      if (!shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, contextRevision)) return;
       const matchingAssignment = assignments.find((item) =>
         item.branch.id === body.submission!.branch_id
         && item.businessLine.id === body.submission!.business_line_id,
@@ -559,13 +615,20 @@ export function MonthlySubmissionCenter({
       if (!matchingAssignment) {
         throw new Error("Este cierre está fuera de tus asignaciones activas.");
       }
+      const loadedPeriod = body.submission.period_start.slice(0, 7);
+      storeActiveDraft();
+      const loadedContextKey = monthlyDraftKey(matchingAssignment.id, loadedPeriod);
+      markContextChange(loadedContextKey);
+      const loadedRevision = contextRevisionRef.current;
+      completionContextKey = loadedContextKey;
+      completionRevision = loadedRevision;
       setAssignmentId(matchingAssignment.id);
       setCountryId(body.submission.country_id);
       setCompanyId(body.submission.company_id);
       setOperationalAreaId(body.submission.operational_area_id ?? "");
       setBranchId(body.submission.branch_id);
       setBusinessLineId(body.submission.business_line_id);
-      setPeriodMonth(body.submission.period_start.slice(0, 7));
+      setPeriodMonth(loadedPeriod);
       const loadedResponses = Object.fromEntries(
         Object.entries(body.version.responses ?? {}).map(([key, value]) => [key, value === null || value === undefined ? "" : String(value)]),
       );
@@ -578,12 +641,16 @@ export function MonthlySubmissionCenter({
         ? body.version.validation_summary.blockers.filter((value): value is string => typeof value === "string")
         : []);
       setCurrentStep(0);
-      await loadAttachments(body.submission.id, body.version.id);
-      setMessage({ type: "ok", text: `Cierre cargado · versión ${body.version.version_number} · ${body.version.status}.` });
+      await loadAttachments(body.submission.id, body.version.id, loadedContextKey, loadedRevision);
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, loadedContextKey, loadedRevision)) {
+        setMessage({ type: "ok", text: `Cierre cargado · versión ${body.version.version_number} · ${body.version.status}.` });
+      }
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo abrir el cierre." });
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, contextRevision)) {
+        setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo abrir el cierre." });
+      }
     } finally {
-      setBusy(null);
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, completionContextKey, completionRevision)) setBusy(null);
     }
   }
 
@@ -596,6 +663,7 @@ export function MonthlySubmissionCenter({
     setBusy("save");
     setMessage(null);
     const contextRevision = contextRevisionRef.current;
+    const requestContextKey = activeContextKeyRef.current;
     try {
       const response = await fetch("/api/monthly-submissions", {
         method: "POST",
@@ -614,11 +682,17 @@ export function MonthlySubmissionCenter({
       });
       const body = (await response.json()) as ApiResult;
       if (!response.ok || !body.submissionId || !body.version) throw new Error(body.message ?? body.error ?? "No se pudo guardar el cierre.");
-      if (contextRevision !== contextRevisionRef.current) {
-        setMessage({ type: "ok", text: "El borrador se guardó en su contexto original; los cambios del contexto actual siguen sin guardar." });
+      if (activeContextKeyRef.current !== requestContextKey) {
         return;
       }
-      setSaved({ submissionId: body.submissionId, versionId: body.version.id, versionNumber: body.version.version_number, status: body.version.status });
+      const savedVersion = { submissionId: body.submissionId, versionId: body.version.id, versionNumber: body.version.version_number, status: body.version.status };
+      if (contextRevision !== contextRevisionRef.current) {
+        setSaved(savedVersion);
+        setDirty(true);
+        setMessage({ type: "ok", text: "Se guardó la versión enviada, pero mantuvimos tus cambios posteriores como pendientes." });
+        return;
+      }
+      setSaved(savedVersion);
       setAttachments([]);
       setDirty(false);
       setWarnings(body.validation?.warnings ?? []);
@@ -626,9 +700,11 @@ export function MonthlySubmissionCenter({
       setMessage({ type: "ok", text: `Versión ${body.version.version_number} guardada como borrador. Los pendientes se conservan para resolverlos antes de publicar.` });
       if (showRecent) await refreshRecent();
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo guardar el cierre." });
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, contextRevision)) {
+        setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo guardar el cierre." });
+      }
     } finally {
-      setBusy(null);
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, contextRevision)) setBusy(null);
     }
   }
 

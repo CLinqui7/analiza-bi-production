@@ -12,6 +12,12 @@ function jsonError(error: string, status: number) {
   return NextResponse.json({ error, ok: false }, { status });
 }
 
+function jsonWithTiming(body: unknown, startedAt: number) {
+  const response = NextResponse.json(body);
+  response.headers.set("Server-Timing", `app;dur=${Math.round((performance.now() - startedAt) * 10) / 10}`);
+  return response;
+}
+
 function uniqueManagers(managers: readonly ManagerOption[]) {
   return Array.from(new Map(managers.map((manager) => [manager.id, manager])).values());
 }
@@ -59,6 +65,7 @@ function managersForActor(
 }
 
 export async function GET() {
+  const startedAt = performance.now();
   const actor = await getCurrentAuthorizationActor();
 
   if (!actor) {
@@ -144,7 +151,7 @@ export async function GET() {
       })),
     };
 
-    return NextResponse.json({
+    return jsonWithTiming({
       ok: true,
       options,
       // The header consumes this metadata with the same authoritative option
@@ -170,7 +177,7 @@ export async function GET() {
         scopeGrants: v7Actor.scopeGrants,
         userId: actor.userId,
       },
-    });
+    }, startedAt);
   } catch (error) {
     console.error("Failed to load official context options", {
       message: error instanceof Error ? error.message : "Unknown error",

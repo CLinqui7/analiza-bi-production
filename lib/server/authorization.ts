@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 
 import {
   demoAdminCookieName,
@@ -181,7 +182,7 @@ async function readSupabaseAuthorizationActor(): Promise<AuthorizationActor | nu
   };
 }
 
-export async function getCurrentAuthorizationActor(
+async function getCurrentAuthorizationActorUncached(
   cookieSource?: CookieSource,
 ) {
   const resolvedCookieSource = await getCookieSource(cookieSource);
@@ -193,6 +194,13 @@ export async function getCurrentAuthorizationActor(
 
   return readSupabaseAuthorizationActor();
 }
+
+/**
+ * React's server cache is scoped to the current render/request. It dedupes
+ * repeated layout, page, and server-component reads without retaining a
+ * session or authorization decision beyond that request.
+ */
+export const getCurrentAuthorizationActor = cache(getCurrentAuthorizationActorUncached);
 
 export async function requireProtectedAccess() {
   const actor = await getCurrentAuthorizationActor();

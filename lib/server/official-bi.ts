@@ -187,7 +187,7 @@ export async function getOfficialExecutiveSnapshot(
   actor: AuthorizationActor,
   filter: OfficialDashboardFilter = {},
 ): Promise<OfficialExecutiveSnapshot> {
-  const branchSnapshot = await getBranchBiSnapshot(actor, filter);
+  const branchSnapshot = await getBranchBiSnapshot(actor, filter, { mode: "summary" });
   const scopedRecords = branchSnapshot.records.filter(
     (record) =>
       (isWildcard(filter.countryId) || record.countryId === filter.countryId) &&

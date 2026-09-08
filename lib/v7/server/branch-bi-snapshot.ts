@@ -76,11 +76,19 @@ export type BranchBiInsight = {
 export type BranchBiSnapshot = {
   generatedAt: string;
   history: BranchBiHistoryEntry[];
-  historyStatus: "available" | "no_data" | "scope_empty" | "source_error";
+  historyStatus: "available" | "no_data" | "not_requested" | "scope_empty" | "source_error";
   insights: BranchBiInsight[];
   records: BranchBiRecord[];
   sourceAvailable: boolean;
   sourceTables: string[];
+};
+
+/**
+ * Keep expensive, unrelated BI reads out of routes that cannot render them.
+ * This is a per-request loading choice, not a cross-user cache key.
+ */
+export type BranchBiSnapshotLoadOptions = {
+  mode?: "history" | "summary";
 };
 
 export type BranchBiHistoryEntry = {
@@ -196,19 +204,10 @@ function metricFrom(row: ClosingKpiRow): BranchBiMetric | null {
   };
 }
 
-function latestByBranchLine(
-  versions: readonly ClosingVersionRow[],
-  branchId: string,
-  businessLineId: string | null,
-) {
-  return versions
-    .filter((version) => version.branch_id === branchId && version.business_line_id === businessLineId)
-    .sort((left, right) => periodFor(right).localeCompare(periodFor(left)))[0] ?? null;
-}
-
 async function getBranchBiSnapshotUncached(
   actor: AuthorizationActor,
   filter: BranchBiFilter = {},
+  load: BranchBiSnapshotLoadOptions = {},
 ): Promise<BranchBiSnapshot> {
   const admin = getSupabaseAdminClient();
   const generatedAt = new Date().toISOString();
@@ -241,9 +240,16 @@ async function getBranchBiSnapshotUncached(
     .in("branch_id", visibleBranchIds)
     .eq("is_demo", false)
     .in("status", ["PUBLISHED", "published"]);
+  if (hasScopedFilter(filter.countryId)) versionsQuery = versionsQuery.eq("country_id", filter.countryId!);
+  if (hasScopedFilter(filter.companyId)) versionsQuery = versionsQuery.eq("company_id", filter.companyId!);
+  if (hasScopedFilter(filter.areaId)) versionsQuery = versionsQuery.eq("operational_area_id", filter.areaId!);
+  if (hasScopedFilter(filter.branchId)) versionsQuery = versionsQuery.eq("branch_id", filter.branchId!);
+  if (hasScopedFilter(filter.businessLineId)) versionsQuery = versionsQuery.eq("business_line_id", filter.businessLineId!);
   if (filter.periodStart) versionsQuery = versionsQuery.gte("period_end", filter.periodStart);
   if (filter.periodEnd) versionsQuery = versionsQuery.lte("period_start", filter.periodEnd);
-  const versionsResult = await versionsQuery;
+  const versionsResult = load.mode === "history"
+    ? { data: [] as ClosingVersionRow[], error: null }
+    : await versionsQuery;
 
   const versions = ((versionsResult.data ?? []) as ClosingVersionRow[]).filter((version) =>
     actorCanSee(v7Actor, {
@@ -261,7 +267,9 @@ async function getBranchBiSnapshotUncached(
     && (!hasScopedFilter(filter.businessLineId) || version.business_line_id === filter.businessLineId),
   );
   const versionIds = versions.map((version) => version.id);
-  const [kpisResult, insightsResult, submissionsResult] = await Promise.all([
+  const [kpisResult, insightsResult] = load.mode === "history"
+    ? [{ data: [] as ClosingKpiRow[], error: null }, { data: [] as InsightRow[], error: null }]
+    : await Promise.all([
     versionIds.length > 0
       ? admin
           .from("closing_kpi_results")
@@ -277,18 +285,7 @@ async function getBranchBiSnapshotUncached(
       .eq("is_demo", false)
       .order("created_at", { ascending: false })
       .limit(20),
-    (() => {
-      let query = admin
-      .from("manual_monthly_submissions")
-      .select("id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start")
-      .eq("organization_id", actor.scope.organizationId)
-      .in("branch_id", visibleBranchIds)
-      .eq("is_demo", false);
-      if (filter.periodStart) query = query.gte("period_start", filter.periodStart);
-      if (filter.periodEnd) query = query.lte("period_start", filter.periodEnd);
-      return query;
-    })(),
-  ]);
+    ]);
   const kpis = (kpisResult.data ?? []) as ClosingKpiRow[];
   const areasById = new Map(context.operationalAreas.map((area) => [area.id, area]));
   const countriesById = new Map(context.countries.map((country) => [country.id, country]));
@@ -299,7 +296,26 @@ async function getBranchBiSnapshotUncached(
     context.areaManagers.map((manager) => [manager.operationalAreaId, manager]),
   );
   const linesById = new Map(context.businessLines.map((line) => [line.id, line]));
-  const manualSubmissions = ((submissionsResult.data ?? []) as ManualSubmissionRow[]).filter((submission) => {
+  const branchesById = new Map(context.branches.map((branch) => [branch.id, branch]));
+  let history: BranchBiHistoryEntry[] = [];
+  let historyStatus: BranchBiSnapshot["historyStatus"] = "not_requested";
+
+  if (load.mode === "history") {
+    let submissionsQuery = admin
+      .from("manual_monthly_submissions")
+      .select("id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start")
+      .eq("organization_id", actor.scope.organizationId)
+      .in("branch_id", visibleBranchIds)
+      .eq("is_demo", false);
+    if (hasScopedFilter(filter.countryId)) submissionsQuery = submissionsQuery.eq("country_id", filter.countryId!);
+    if (hasScopedFilter(filter.companyId)) submissionsQuery = submissionsQuery.eq("company_id", filter.companyId!);
+    if (hasScopedFilter(filter.areaId)) submissionsQuery = submissionsQuery.eq("operational_area_id", filter.areaId!);
+    if (hasScopedFilter(filter.branchId)) submissionsQuery = submissionsQuery.eq("branch_id", filter.branchId!);
+    if (hasScopedFilter(filter.businessLineId)) submissionsQuery = submissionsQuery.eq("business_line_id", filter.businessLineId!);
+    if (filter.periodStart) submissionsQuery = submissionsQuery.gte("period_start", filter.periodStart);
+    if (filter.periodEnd) submissionsQuery = submissionsQuery.lte("period_start", filter.periodEnd);
+    const submissionsResult = await submissionsQuery;
+    const manualSubmissions = ((submissionsResult.data ?? []) as ManualSubmissionRow[]).filter((submission) => {
     const branchManager = branchManagersByBranchId.get(submission.branch_id);
     const areaManager = submission.operational_area_id
       ? areaManagersByAreaId.get(submission.operational_area_id)
@@ -318,67 +334,78 @@ async function getBranchBiSnapshotUncached(
       && (!hasScopedFilter(filter.branchId) || submission.branch_id === filter.branchId)
       && (!hasScopedFilter(filter.businessLineId) || submission.business_line_id === filter.businessLineId)
       && (!hasScopedFilter(filter.managerId) || branchManager?.id === filter.managerId || areaManager?.id === filter.managerId);
-  });
-  const historyVersionsResult = manualSubmissions.length > 0
-    ? await admin
-      .from("manual_monthly_submission_versions")
-      .select("id,submission_id,version_number,status,validation_summary,created_at,published_at,submitted_by")
-      .in("submission_id", manualSubmissions.map((submission) => submission.id))
-      .order("created_at", { ascending: false })
-      .limit(100)
-    : { data: [] as ManualVersionRow[], error: null };
-  const historyVersions = (historyVersionsResult.data ?? []) as ManualVersionRow[];
-  const historyAuthorIds = Array.from(new Set(historyVersions.map((version) => version.submitted_by).filter((id): id is string => Boolean(id))));
-  const [historyProfilesResult, historyAttachmentsResult] = await Promise.all([
-    historyAuthorIds.length > 0
-      ? admin.from("profiles").select("id,display_name").in("id", historyAuthorIds)
-      : Promise.resolve({ data: [] as Array<{ id: string; display_name: string | null }> }),
-    historyVersions.length > 0
-      ? admin.from("manual_monthly_submission_attachments").select("submission_version_id").in("submission_version_id", historyVersions.map((version) => version.id))
-      : Promise.resolve({ data: [] as AttachmentCountRow[] }),
-  ]);
-  const manualSubmissionById = new Map(manualSubmissions.map((submission) => [submission.id, submission]));
-  const profileNameById = new Map(
-    ((historyProfilesResult.data ?? []) as Array<{ id: string; display_name: string | null }>).map((profile) => [profile.id, profile.display_name]),
-  );
-  const attachmentCountByVersionId = new Map<string, number>();
-  for (const attachment of (historyAttachmentsResult.data ?? []) as AttachmentCountRow[]) {
-    attachmentCountByVersionId.set(attachment.submission_version_id, (attachmentCountByVersionId.get(attachment.submission_version_id) ?? 0) + 1);
+    });
+    const historyVersionsResult = manualSubmissions.length > 0
+      ? await admin
+        .from("manual_monthly_submission_versions")
+        .select("id,submission_id,version_number,status,validation_summary,created_at,published_at,submitted_by")
+        .in("submission_id", manualSubmissions.map((submission) => submission.id))
+        .order("created_at", { ascending: false })
+        .limit(100)
+      : { data: [] as ManualVersionRow[], error: null };
+    const historyVersions = (historyVersionsResult.data ?? []) as ManualVersionRow[];
+    const historyAuthorIds = Array.from(new Set(historyVersions.map((version) => version.submitted_by).filter((id): id is string => Boolean(id))));
+    const [historyProfilesResult, historyAttachmentsResult] = await Promise.all([
+      historyAuthorIds.length > 0
+        ? admin.from("profiles").select("id,display_name").in("id", historyAuthorIds)
+        : Promise.resolve({ data: [] as Array<{ id: string; display_name: string | null }> }),
+      historyVersions.length > 0
+        ? admin.from("manual_monthly_submission_attachments").select("submission_version_id").in("submission_version_id", historyVersions.map((version) => version.id))
+        : Promise.resolve({ data: [] as AttachmentCountRow[] }),
+    ]);
+    const manualSubmissionById = new Map(manualSubmissions.map((submission) => [submission.id, submission]));
+    const profileNameById = new Map(
+      ((historyProfilesResult.data ?? []) as Array<{ id: string; display_name: string | null }>).map((profile) => [profile.id, profile.display_name]),
+    );
+    const attachmentCountByVersionId = new Map<string, number>();
+    for (const attachment of (historyAttachmentsResult.data ?? []) as AttachmentCountRow[]) {
+      attachmentCountByVersionId.set(attachment.submission_version_id, (attachmentCountByVersionId.get(attachment.submission_version_id) ?? 0) + 1);
+    }
+    history = historyVersions.flatMap((version): BranchBiHistoryEntry[] => {
+      const submission = manualSubmissionById.get(version.submission_id);
+      if (!submission) return [];
+      const branch = branchesById.get(submission.branch_id);
+      const line = linesById.get(submission.business_line_id);
+      if (!branch || !line) return [];
+      return [{
+        attachmentCount: attachmentCountByVersionId.get(version.id) ?? 0,
+        authorName: version.submitted_by ? profileNameById.get(version.submitted_by) ?? null : null,
+        branchId: branch.id,
+        branchName: branch.name,
+        businessLineId: line.id,
+        businessLineName: line.name,
+        createdAt: version.created_at,
+        periodStart: submission.period_start,
+        publishedAt: version.published_at,
+        status: version.status,
+        submissionId: submission.id,
+        validationSummary: version.validation_summary ?? {},
+        versionId: version.id,
+        versionNumber: version.version_number,
+      }];
+    });
+    historyStatus = submissionsResult.error || historyVersionsResult.error
+      ? "source_error"
+      : history.length > 0
+        ? "available"
+        : "no_data";
   }
-  const history = historyVersions.flatMap((version): BranchBiHistoryEntry[] => {
-    const submission = manualSubmissionById.get(version.submission_id);
-    if (!submission) return [];
-    const branch = context.branches.find((item) => item.id === submission.branch_id);
-    const line = linesById.get(submission.business_line_id);
-    if (!branch || !line) return [];
-    return [{
-      attachmentCount: attachmentCountByVersionId.get(version.id) ?? 0,
-      authorName: version.submitted_by ? profileNameById.get(version.submitted_by) ?? null : null,
-      branchId: branch.id,
-      branchName: branch.name,
-      businessLineId: line.id,
-      businessLineName: line.name,
-      createdAt: version.created_at,
-      periodStart: submission.period_start,
-      publishedAt: version.published_at,
-      status: version.status,
-      submissionId: submission.id,
-      validationSummary: version.validation_summary ?? {},
-      versionId: version.id,
-      versionNumber: version.version_number,
-    }];
-  });
-  const historyStatus: BranchBiSnapshot["historyStatus"] = submissionsResult.error || historyVersionsResult.error
-    ? "source_error"
-    : history.length > 0
-      ? "available"
-      : "no_data";
   const kpisByVersion = new Map<string, ClosingKpiRow[]>();
 
   for (const kpi of kpis) {
     const rows = kpisByVersion.get(kpi.closing_version_id) ?? [];
     rows.push(kpi);
     kpisByVersion.set(kpi.closing_version_id, rows);
+  }
+  const versionsByBranchLine = new Map<string, ClosingVersionRow[]>();
+  for (const version of versions) {
+    const key = `${version.branch_id}:${version.business_line_id ?? "unassigned"}`;
+    const rows = versionsByBranchLine.get(key) ?? [];
+    rows.push(version);
+    versionsByBranchLine.set(key, rows);
+  }
+  for (const rows of versionsByBranchLine.values()) {
+    rows.sort((left, right) => periodFor(left).localeCompare(periodFor(right)));
   }
 
   const branchLineEntries: Array<[string, { branchId: string; businessLineId: string | null }]> = [
@@ -394,9 +421,10 @@ async function getBranchBiSnapshotUncached(
   const branchLineKeys = Array.from(new Map(branchLineEntries).values());
   const records = branchLineKeys
     .flatMap(({ branchId, businessLineId }): BranchBiRecord[] => {
-      const branch = context.branches.find((item) => item.id === branchId);
+      const branch = branchesById.get(branchId);
       if (!branch) return [];
-      const latestVersion = latestByBranchLine(versions, branch.id, businessLineId);
+      const branchLineVersions = versionsByBranchLine.get(`${branch.id}:${businessLineId ?? "unassigned"}`) ?? [];
+      const latestVersion = branchLineVersions.at(-1) ?? null;
       const area = branch.operationalAreaId
         ? areasById.get(branch.operationalAreaId)
         : null;
@@ -410,9 +438,7 @@ async function getBranchBiSnapshotUncached(
         if (key && metric && !latestMetrics[key]) latestMetrics[key] = metric;
       }
 
-      const trend = versions
-        .filter((version) => version.branch_id === branch.id && version.business_line_id === businessLineId)
-        .sort((left, right) => periodFor(left).localeCompare(periodFor(right)))
+      const trend = branchLineVersions
         .map((version) => {
           const revenue = (kpisByVersion.get(version.id) ?? [])
             .map((kpi) => ({ key: metricKeyFor(kpi), metric: metricFrom(kpi) }))

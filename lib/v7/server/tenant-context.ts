@@ -184,6 +184,19 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
     ? createAdminClient()
     : await createClient();
   const organizationId = actor.scope.organizationId;
+  const isGlobal = globalRoles.has(actor.roleKey);
+  const actorGrants = grantsFor(actor);
+  // A branch manager with only concrete branch grants must not download the
+  // organization directory merely to render a monthly form. Broader grants
+  // deliberately retain the existing catalog path and are filtered below.
+  const branchGrantIds = Array.from(new Set(
+    actorGrants.map((grant) => grant.branchId).filter((id): id is string => Boolean(id)),
+  ));
+  const lineGrantIds = Array.from(new Set(
+    actorGrants.map((grant) => grant.businessLineId).filter((id): id is string => Boolean(id)),
+  ));
+  const hasOnlyConcreteBranchGrants = !isGlobal && branchGrantIds.length > 0
+    && actorGrants.every((grant) => Boolean(grant.branchId));
 
   const [
     countriesResult,
@@ -197,11 +210,27 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
   ] = await Promise.all([
     supabase.from("countries").select("id,name,iso2").eq("organization_id", organizationId).order("name"),
     supabase.from("companies").select("id,name,key").eq("organization_id", organizationId).order("name"),
-    supabase.from("business_lines").select("id,name,code,company_id").eq("organization_id", organizationId).eq("is_enabled", true).order("name"),
+    (() => {
+      let query = supabase.from("business_lines").select("id,name,code,company_id").eq("organization_id", organizationId).eq("is_enabled", true);
+      if (hasOnlyConcreteBranchGrants && lineGrantIds.length > 0 && actorGrants.every((grant) => Boolean(grant.businessLineId))) query = query.in("id", lineGrantIds);
+      return query.order("name");
+    })(),
     supabase.from("operational_areas").select("id,name,code,company_id,country_id,manager_profile_id").eq("organization_id", organizationId).eq("status", "active").order("name"),
-    supabase.from("branches").select("id,name,code,company_id,country_id,operational_area_id,city,status").eq("organization_id", organizationId).in("status", ["active", "pending_manager"]).order("name"),
-    supabase.from("branch_managers").select("id,branch_id,profile_id,display_name,email,starts_on,ends_on").eq("organization_id", organizationId).eq("is_demo", false).order("display_name"),
-    supabase.from("manager_assignments").select("profile_id,role_id,operational_area_id,branch_id").eq("organization_id", organizationId).eq("status", "active").is("deactivated_at", null),
+    (() => {
+      let query = supabase.from("branches").select("id,name,code,company_id,country_id,operational_area_id,city,status").eq("organization_id", organizationId).in("status", ["active", "pending_manager"]);
+      if (hasOnlyConcreteBranchGrants) query = query.in("id", branchGrantIds);
+      return query.order("name");
+    })(),
+    (() => {
+      let query = supabase.from("branch_managers").select("id,branch_id,profile_id,display_name,email,starts_on,ends_on").eq("organization_id", organizationId).eq("is_demo", false);
+      if (hasOnlyConcreteBranchGrants) query = query.in("branch_id", branchGrantIds);
+      return query.order("display_name");
+    })(),
+    (() => {
+      let query = supabase.from("manager_assignments").select("profile_id,role_id,operational_area_id,branch_id").eq("organization_id", organizationId).eq("status", "active").is("deactivated_at", null);
+      if (hasOnlyConcreteBranchGrants) query = query.in("branch_id", branchGrantIds);
+      return query;
+    })(),
     supabase.from("roles").select("id,key"),
   ]);
 
@@ -248,7 +277,6 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
     ...visibleAreas.map((item) => item.country_id),
   ]);
 
-  const isGlobal = globalRoles.has(actor.roleKey);
   const visibleCompanies = isGlobal
     ? companies
     : companies.filter((item) => visibleCompanyIds.has(item.id));
