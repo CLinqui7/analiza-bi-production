@@ -24,7 +24,6 @@ export function toV7Actor(
   };
 }
 
-
 async function resolveV7ActorFromCurrentUncached(
   actor: NonNullable<Awaited<ReturnType<typeof getCurrentAuthorizationActor>>>,
 ): Promise<Actor> {
@@ -52,21 +51,27 @@ async function resolveV7ActorFromCurrentUncached(
     return base;
   }
 
-  const { data: userRoleGrantData } = await admin
-    .from("user_roles")
-    .select("country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code")
-    .eq("user_id", actor.userId)
-    .eq("organization_id", actor.scope.organizationId)
-    .eq("role_id", role.id)
-    .eq("status", "active");
-
-  const { data: managerAssignmentData } = await admin
-    .from("manager_assignments")
-    .select("country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code")
-    .eq("profile_id", actor.userId)
-    .eq("organization_id", actor.scope.organizationId)
-    .eq("role_id", role.id)
-    .eq("status", "active");
+  const [{ data: userRoleGrantData }, { data: managerAssignmentData }] =
+    await Promise.all([
+      admin
+        .from("user_roles")
+        .select(
+          "country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code",
+        )
+        .eq("user_id", actor.userId)
+        .eq("organization_id", actor.scope.organizationId)
+        .eq("role_id", role.id)
+        .eq("status", "active"),
+      admin
+        .from("manager_assignments")
+        .select(
+          "country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code",
+        )
+        .eq("profile_id", actor.userId)
+        .eq("organization_id", actor.scope.organizationId)
+        .eq("role_id", role.id)
+        .eq("status", "active"),
+    ]);
 
   const grants = [
     ...(userRoleGrantData ?? []),
@@ -93,7 +98,14 @@ async function resolveV7ActorFromCurrentUncached(
   const distinctScopeGrants = Array.from(
     new Map(
       scopeGrants.map((grant) => [
-        [grant.organizationId, grant.countryId, grant.companyId, grant.operationalAreaId, grant.branchId, grant.businessLineId].join("|"),
+        [
+          grant.organizationId,
+          grant.countryId,
+          grant.companyId,
+          grant.operationalAreaId,
+          grant.branchId,
+          grant.businessLineId,
+        ].join("|"),
         grant,
       ]),
     ).values(),
@@ -102,12 +114,15 @@ async function resolveV7ActorFromCurrentUncached(
   return {
     ...base,
     roleId: role.id,
-    scopeGrants: distinctScopeGrants.length > 0 ? distinctScopeGrants : base.scopeGrants,
+    scopeGrants:
+      distinctScopeGrants.length > 0 ? distinctScopeGrants : base.scopeGrants,
   };
 }
 
 /** Request-scoped actor/grant resolution; never a process-wide permission cache. */
-export const resolveV7ActorFromCurrent = cache(resolveV7ActorFromCurrentUncached);
+export const resolveV7ActorFromCurrent = cache(
+  resolveV7ActorFromCurrentUncached,
+);
 
 export async function actorForApi(
   action?: ActionKey,

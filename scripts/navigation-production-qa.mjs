@@ -7,6 +7,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const defaultBaseUrl = "https://web-clinqui7s-projects.vercel.app";
 const navigationTimeoutMs = 20_000;
+const rscStreamTimeoutMs = 5_000;
 const routeReadyMarker = {
   "/protected/cierres": "closures",
   "/protected/mi-sucursal": "my-branch",
@@ -47,6 +48,28 @@ function median(values) {
 
 function hrefSelector(pathname) {
   return `a[href^="${pathname}"]`;
+}
+
+async function recordRscStreamCompletion(response, measurement, startedAt) {
+  let timeout;
+  const outcome = await Promise.race([
+    response.finished().then(
+      () => "finished",
+      () => "failed",
+    ),
+    new Promise((resolve) => {
+      timeout = setTimeout(() => resolve("timeout"), rscStreamTimeoutMs);
+    }),
+  ]);
+  clearTimeout(timeout);
+
+  if (outcome === "finished") {
+    measurement.streamCompletedMs = Math.round(performance.now() - startedAt);
+    return;
+  }
+
+  measurement.streamCompletedMs = null;
+  measurement.streamOutcome = outcome;
 }
 
 const env = environment();
@@ -197,6 +220,7 @@ try {
     await link.waitFor({ state: "visible", timeout: navigationTimeoutMs });
 
     const responses = [];
+    const responseFinishers = [];
     const responseListener = (response) => {
       const request = response.request();
       const responseUrl = response.url();
@@ -207,11 +231,15 @@ try {
         (responseUrl.includes("_rsc=") ||
           response.headers()["content-type"]?.includes("text/x-component"))
       ) {
-        responses.push({
-          completedMs: Math.round(performance.now() - startedAt),
+        const measurement = {
+          headersMs: Math.round(performance.now() - startedAt),
           status: response.status(),
           url: responseUrl,
-        });
+        };
+        responses.push(measurement);
+        responseFinishers.push(
+          recordRscStreamCompletion(response, measurement, startedAt),
+        );
       }
     };
     const startedAt = performance.now();
@@ -250,8 +278,10 @@ try {
           timeout: navigationTimeoutMs,
         });
       }
+      const contentReadyMs = Math.round(performance.now() - startedAt);
+      await Promise.all(responseFinishers);
       return {
-        contentReadyMs: Math.round(performance.now() - startedAt),
+        contentReadyMs,
         pendingFeedbackMs: await pendingFeedback,
         pathname,
         rscResponses: responses,

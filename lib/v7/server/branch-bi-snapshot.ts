@@ -5,15 +5,13 @@ import { cache } from "react";
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { resolveV7ActorFromCurrent } from "@/lib/v7/server/api-auth";
-import { actorCanSee, getTenantContextOptions } from "@/lib/v7/server/tenant-context";
+import {
+  actorCanSee,
+  getTenantContextOptions,
+} from "@/lib/v7/server/tenant-context";
 
 export type BranchBiMetricKey =
-  | "revenue"
-  | "margin"
-  | "volume"
-  | "occupancy"
-  | "sla"
-  | "score";
+  "revenue" | "margin" | "volume" | "occupancy" | "sla" | "score";
 
 export type BranchBiMetric = {
   label: string;
@@ -76,7 +74,8 @@ export type BranchBiInsight = {
 export type BranchBiSnapshot = {
   generatedAt: string;
   history: BranchBiHistoryEntry[];
-  historyStatus: "available" | "no_data" | "not_requested" | "scope_empty" | "source_error";
+  historyStatus:
+    "available" | "no_data" | "not_requested" | "scope_empty" | "source_error";
   insights: BranchBiInsight[];
   records: BranchBiRecord[];
   sourceAvailable: boolean;
@@ -170,7 +169,9 @@ function hasScopedFilter(value: string | undefined) {
 }
 
 function periodFor(version: ClosingVersionRow) {
-  return version.period_end ?? version.period_start ?? version.published_at ?? "";
+  return (
+    version.period_end ?? version.period_start ?? version.published_at ?? ""
+  );
 }
 
 function isCalculable(row: ClosingKpiRow) {
@@ -186,10 +187,16 @@ function metricKeyFor(row: ClosingKpiRow): BranchBiMetricKey | null {
 
   if (/(venta|revenue|facturacion|ingreso)/.test(signature)) return "revenue";
   if (/(margen|margin)/.test(signature)) return "margin";
-  if (/(ocupacion|occupancy|utilizacion|utilization)/.test(signature)) return "occupancy";
+  if (/(ocupacion|occupancy|utilizacion|utilization)/.test(signature))
+    return "occupancy";
   if (/(sla|tat|turnaround)/.test(signature)) return "sla";
   if (/(puntaje|score|performance)/.test(signature)) return "score";
-  if (/(orden|order|paciente|patient|cliente|client|sesion|session|estudio|study|volumen|volume)/.test(signature)) return "volume";
+  if (
+    /(orden|order|paciente|patient|cliente|client|sesion|session|estudio|study|volumen|volume)/.test(
+      signature,
+    )
+  )
+    return "volume";
   return null;
 }
 
@@ -222,144 +229,260 @@ async function getBranchBiSnapshotUncached(
   ];
 
   if (!admin) {
-    return { generatedAt, history: [], historyStatus: "source_error", insights: [], records: [], sourceAvailable: false, sourceTables };
+    return {
+      generatedAt,
+      history: [],
+      historyStatus: "source_error",
+      insights: [],
+      records: [],
+      sourceAvailable: false,
+      sourceTables,
+    };
   }
 
   const v7Actor = await resolveV7ActorFromCurrent(actor);
-  const context = await getTenantContextOptions(v7Actor);
+  const context = await getTenantContextOptions(v7Actor, false);
   const visibleBranchIds = context.branches.map((branch) => branch.id);
 
   if (visibleBranchIds.length === 0) {
-    return { generatedAt, history: [], historyStatus: "scope_empty", insights: [], records: [], sourceAvailable: true, sourceTables };
+    return {
+      generatedAt,
+      history: [],
+      historyStatus: "scope_empty",
+      insights: [],
+      records: [],
+      sourceAvailable: true,
+      sourceTables,
+    };
   }
 
   let versionsQuery = admin
     .from("closing_versions")
-    .select("id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,published_at,quality_score")
+    .select(
+      "id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,published_at,quality_score",
+    )
     .eq("organization_id", actor.scope.organizationId)
     .in("branch_id", visibleBranchIds)
     .eq("is_demo", false)
     .in("status", ["PUBLISHED", "published"]);
-  if (hasScopedFilter(filter.countryId)) versionsQuery = versionsQuery.eq("country_id", filter.countryId!);
-  if (hasScopedFilter(filter.companyId)) versionsQuery = versionsQuery.eq("company_id", filter.companyId!);
-  if (hasScopedFilter(filter.areaId)) versionsQuery = versionsQuery.eq("operational_area_id", filter.areaId!);
-  if (hasScopedFilter(filter.branchId)) versionsQuery = versionsQuery.eq("branch_id", filter.branchId!);
-  if (hasScopedFilter(filter.businessLineId)) versionsQuery = versionsQuery.eq("business_line_id", filter.businessLineId!);
-  if (filter.periodStart) versionsQuery = versionsQuery.gte("period_end", filter.periodStart);
-  if (filter.periodEnd) versionsQuery = versionsQuery.lte("period_start", filter.periodEnd);
-  const versionsResult = load.mode === "history"
-    ? { data: [] as ClosingVersionRow[], error: null }
-    : await versionsQuery;
+  if (hasScopedFilter(filter.countryId))
+    versionsQuery = versionsQuery.eq("country_id", filter.countryId!);
+  if (hasScopedFilter(filter.companyId))
+    versionsQuery = versionsQuery.eq("company_id", filter.companyId!);
+  if (hasScopedFilter(filter.areaId))
+    versionsQuery = versionsQuery.eq("operational_area_id", filter.areaId!);
+  if (hasScopedFilter(filter.branchId))
+    versionsQuery = versionsQuery.eq("branch_id", filter.branchId!);
+  if (hasScopedFilter(filter.businessLineId))
+    versionsQuery = versionsQuery.eq(
+      "business_line_id",
+      filter.businessLineId!,
+    );
+  if (filter.periodStart)
+    versionsQuery = versionsQuery.gte("period_end", filter.periodStart);
+  if (filter.periodEnd)
+    versionsQuery = versionsQuery.lte("period_start", filter.periodEnd);
+  const versionsResult =
+    load.mode === "history"
+      ? { data: [] as ClosingVersionRow[], error: null }
+      : await versionsQuery;
 
-  const versions = ((versionsResult.data ?? []) as ClosingVersionRow[]).filter((version) =>
-    actorCanSee(v7Actor, {
-      organizationId: actor.scope.organizationId,
-      branchId: version.branch_id,
-      businessLineId: version.business_line_id,
-      companyId: version.company_id,
-      countryId: version.country_id,
-      operationalAreaId: version.operational_area_id,
-    })
-    && (!hasScopedFilter(filter.countryId) || version.country_id === filter.countryId)
-    && (!hasScopedFilter(filter.companyId) || version.company_id === filter.companyId)
-    && (!hasScopedFilter(filter.areaId) || version.operational_area_id === filter.areaId)
-    && (!hasScopedFilter(filter.branchId) || version.branch_id === filter.branchId)
-    && (!hasScopedFilter(filter.businessLineId) || version.business_line_id === filter.businessLineId),
+  const versions = ((versionsResult.data ?? []) as ClosingVersionRow[]).filter(
+    (version) =>
+      actorCanSee(v7Actor, {
+        organizationId: actor.scope.organizationId,
+        branchId: version.branch_id,
+        businessLineId: version.business_line_id,
+        companyId: version.company_id,
+        countryId: version.country_id,
+        operationalAreaId: version.operational_area_id,
+      }) &&
+      (!hasScopedFilter(filter.countryId) ||
+        version.country_id === filter.countryId) &&
+      (!hasScopedFilter(filter.companyId) ||
+        version.company_id === filter.companyId) &&
+      (!hasScopedFilter(filter.areaId) ||
+        version.operational_area_id === filter.areaId) &&
+      (!hasScopedFilter(filter.branchId) ||
+        version.branch_id === filter.branchId) &&
+      (!hasScopedFilter(filter.businessLineId) ||
+        version.business_line_id === filter.businessLineId),
   );
   const versionIds = versions.map((version) => version.id);
-  const [kpisResult, insightsResult] = load.mode === "history"
-    ? [{ data: [] as ClosingKpiRow[], error: null }, { data: [] as InsightRow[], error: null }]
-    : await Promise.all([
-    versionIds.length > 0
-      ? admin
-          .from("closing_kpi_results")
-          .select("closing_version_id,kpi_code,kpi_name,category,value,unit,data_status")
-          .in("closing_version_id", versionIds)
-          .eq("is_demo", false)
-      : Promise.resolve({ data: [] as ClosingKpiRow[] }),
-    admin
-      .from("insights")
-      .select("branch_id,title,summary,severity,recommended_action")
-      .eq("organization_id", actor.scope.organizationId)
-      .in("branch_id", visibleBranchIds)
-      .eq("is_demo", false)
-      .order("created_at", { ascending: false })
-      .limit(20),
-    ]);
+  const [kpisResult, insightsResult] =
+    load.mode === "history"
+      ? [
+          { data: [] as ClosingKpiRow[], error: null },
+          { data: [] as InsightRow[], error: null },
+        ]
+      : await Promise.all([
+          versionIds.length > 0
+            ? admin
+                .from("closing_kpi_results")
+                .select(
+                  "closing_version_id,kpi_code,kpi_name,category,value,unit,data_status",
+                )
+                .in("closing_version_id", versionIds)
+                .eq("is_demo", false)
+            : Promise.resolve({ data: [] as ClosingKpiRow[] }),
+          admin
+            .from("insights")
+            .select("branch_id,title,summary,severity,recommended_action")
+            .eq("organization_id", actor.scope.organizationId)
+            .in("branch_id", visibleBranchIds)
+            .eq("is_demo", false)
+            .order("created_at", { ascending: false })
+            .limit(20),
+        ]);
   const kpis = (kpisResult.data ?? []) as ClosingKpiRow[];
-  const areasById = new Map(context.operationalAreas.map((area) => [area.id, area]));
-  const countriesById = new Map(context.countries.map((country) => [country.id, country]));
+  const areasById = new Map(
+    context.operationalAreas.map((area) => [area.id, area]),
+  );
+  const countriesById = new Map(
+    context.countries.map((country) => [country.id, country]),
+  );
   const branchManagersByBranchId = new Map(
     context.branchManagers.map((manager) => [manager.branchId, manager]),
   );
   const areaManagersByAreaId = new Map(
     context.areaManagers.map((manager) => [manager.operationalAreaId, manager]),
   );
-  const linesById = new Map(context.businessLines.map((line) => [line.id, line]));
-  const branchesById = new Map(context.branches.map((branch) => [branch.id, branch]));
+  const linesById = new Map(
+    context.businessLines.map((line) => [line.id, line]),
+  );
+  const branchesById = new Map(
+    context.branches.map((branch) => [branch.id, branch]),
+  );
   let history: BranchBiHistoryEntry[] = [];
   let historyStatus: BranchBiSnapshot["historyStatus"] = "not_requested";
 
   if (load.mode === "history") {
     let submissionsQuery = admin
       .from("manual_monthly_submissions")
-      .select("id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start")
+      .select(
+        "id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start",
+      )
       .eq("organization_id", actor.scope.organizationId)
       .in("branch_id", visibleBranchIds)
       .eq("is_demo", false);
-    if (hasScopedFilter(filter.countryId)) submissionsQuery = submissionsQuery.eq("country_id", filter.countryId!);
-    if (hasScopedFilter(filter.companyId)) submissionsQuery = submissionsQuery.eq("company_id", filter.companyId!);
-    if (hasScopedFilter(filter.areaId)) submissionsQuery = submissionsQuery.eq("operational_area_id", filter.areaId!);
-    if (hasScopedFilter(filter.branchId)) submissionsQuery = submissionsQuery.eq("branch_id", filter.branchId!);
-    if (hasScopedFilter(filter.businessLineId)) submissionsQuery = submissionsQuery.eq("business_line_id", filter.businessLineId!);
-    if (filter.periodStart) submissionsQuery = submissionsQuery.gte("period_start", filter.periodStart);
-    if (filter.periodEnd) submissionsQuery = submissionsQuery.lte("period_start", filter.periodEnd);
+    if (hasScopedFilter(filter.countryId))
+      submissionsQuery = submissionsQuery.eq("country_id", filter.countryId!);
+    if (hasScopedFilter(filter.companyId))
+      submissionsQuery = submissionsQuery.eq("company_id", filter.companyId!);
+    if (hasScopedFilter(filter.areaId))
+      submissionsQuery = submissionsQuery.eq(
+        "operational_area_id",
+        filter.areaId!,
+      );
+    if (hasScopedFilter(filter.branchId))
+      submissionsQuery = submissionsQuery.eq("branch_id", filter.branchId!);
+    if (hasScopedFilter(filter.businessLineId))
+      submissionsQuery = submissionsQuery.eq(
+        "business_line_id",
+        filter.businessLineId!,
+      );
+    if (filter.periodStart)
+      submissionsQuery = submissionsQuery.gte(
+        "period_start",
+        filter.periodStart,
+      );
+    if (filter.periodEnd)
+      submissionsQuery = submissionsQuery.lte("period_start", filter.periodEnd);
     const submissionsResult = await submissionsQuery;
-    const manualSubmissions = ((submissionsResult.data ?? []) as ManualSubmissionRow[]).filter((submission) => {
-    const branchManager = branchManagersByBranchId.get(submission.branch_id);
-    const areaManager = submission.operational_area_id
-      ? areaManagersByAreaId.get(submission.operational_area_id)
-      : null;
-    return actorCanSee(v7Actor, {
-      organizationId: actor.scope.organizationId,
-      branchId: submission.branch_id,
-      businessLineId: submission.business_line_id,
-      companyId: submission.company_id,
-      countryId: submission.country_id,
-      operationalAreaId: submission.operational_area_id,
-    })
-      && (!hasScopedFilter(filter.countryId) || submission.country_id === filter.countryId)
-      && (!hasScopedFilter(filter.companyId) || submission.company_id === filter.companyId)
-      && (!hasScopedFilter(filter.areaId) || submission.operational_area_id === filter.areaId)
-      && (!hasScopedFilter(filter.branchId) || submission.branch_id === filter.branchId)
-      && (!hasScopedFilter(filter.businessLineId) || submission.business_line_id === filter.businessLineId)
-      && (!hasScopedFilter(filter.managerId) || branchManager?.id === filter.managerId || areaManager?.id === filter.managerId);
+    const manualSubmissions = (
+      (submissionsResult.data ?? []) as ManualSubmissionRow[]
+    ).filter((submission) => {
+      const branchManager = branchManagersByBranchId.get(submission.branch_id);
+      const areaManager = submission.operational_area_id
+        ? areaManagersByAreaId.get(submission.operational_area_id)
+        : null;
+      return (
+        actorCanSee(v7Actor, {
+          organizationId: actor.scope.organizationId,
+          branchId: submission.branch_id,
+          businessLineId: submission.business_line_id,
+          companyId: submission.company_id,
+          countryId: submission.country_id,
+          operationalAreaId: submission.operational_area_id,
+        }) &&
+        (!hasScopedFilter(filter.countryId) ||
+          submission.country_id === filter.countryId) &&
+        (!hasScopedFilter(filter.companyId) ||
+          submission.company_id === filter.companyId) &&
+        (!hasScopedFilter(filter.areaId) ||
+          submission.operational_area_id === filter.areaId) &&
+        (!hasScopedFilter(filter.branchId) ||
+          submission.branch_id === filter.branchId) &&
+        (!hasScopedFilter(filter.businessLineId) ||
+          submission.business_line_id === filter.businessLineId) &&
+        (!hasScopedFilter(filter.managerId) ||
+          branchManager?.id === filter.managerId ||
+          areaManager?.id === filter.managerId)
+      );
     });
-    const historyVersionsResult = manualSubmissions.length > 0
-      ? await admin
-        .from("manual_monthly_submission_versions")
-        .select("id,submission_id,version_number,status,validation_summary,created_at,published_at,submitted_by")
-        .in("submission_id", manualSubmissions.map((submission) => submission.id))
-        .order("created_at", { ascending: false })
-        .limit(100)
-      : { data: [] as ManualVersionRow[], error: null };
-    const historyVersions = (historyVersionsResult.data ?? []) as ManualVersionRow[];
-    const historyAuthorIds = Array.from(new Set(historyVersions.map((version) => version.submitted_by).filter((id): id is string => Boolean(id))));
-    const [historyProfilesResult, historyAttachmentsResult] = await Promise.all([
-      historyAuthorIds.length > 0
-        ? admin.from("profiles").select("id,display_name").in("id", historyAuthorIds)
-        : Promise.resolve({ data: [] as Array<{ id: string; display_name: string | null }> }),
-      historyVersions.length > 0
-        ? admin.from("manual_monthly_submission_attachments").select("submission_version_id").in("submission_version_id", historyVersions.map((version) => version.id))
-        : Promise.resolve({ data: [] as AttachmentCountRow[] }),
-    ]);
-    const manualSubmissionById = new Map(manualSubmissions.map((submission) => [submission.id, submission]));
+    const historyVersionsResult =
+      manualSubmissions.length > 0
+        ? await admin
+            .from("manual_monthly_submission_versions")
+            .select(
+              "id,submission_id,version_number,status,validation_summary,created_at,published_at,submitted_by",
+            )
+            .in(
+              "submission_id",
+              manualSubmissions.map((submission) => submission.id),
+            )
+            .order("created_at", { ascending: false })
+            .limit(100)
+        : { data: [] as ManualVersionRow[], error: null };
+    const historyVersions = (historyVersionsResult.data ??
+      []) as ManualVersionRow[];
+    const historyAuthorIds = Array.from(
+      new Set(
+        historyVersions
+          .map((version) => version.submitted_by)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    );
+    const [historyProfilesResult, historyAttachmentsResult] = await Promise.all(
+      [
+        historyAuthorIds.length > 0
+          ? admin
+              .from("profiles")
+              .select("id,display_name")
+              .in("id", historyAuthorIds)
+          : Promise.resolve({
+              data: [] as Array<{ id: string; display_name: string | null }>,
+            }),
+        historyVersions.length > 0
+          ? admin
+              .from("manual_monthly_submission_attachments")
+              .select("submission_version_id")
+              .in(
+                "submission_version_id",
+                historyVersions.map((version) => version.id),
+              )
+          : Promise.resolve({ data: [] as AttachmentCountRow[] }),
+      ],
+    );
+    const manualSubmissionById = new Map(
+      manualSubmissions.map((submission) => [submission.id, submission]),
+    );
     const profileNameById = new Map(
-      ((historyProfilesResult.data ?? []) as Array<{ id: string; display_name: string | null }>).map((profile) => [profile.id, profile.display_name]),
+      (
+        (historyProfilesResult.data ?? []) as Array<{
+          id: string;
+          display_name: string | null;
+        }>
+      ).map((profile) => [profile.id, profile.display_name]),
     );
     const attachmentCountByVersionId = new Map<string, number>();
-    for (const attachment of (historyAttachmentsResult.data ?? []) as AttachmentCountRow[]) {
-      attachmentCountByVersionId.set(attachment.submission_version_id, (attachmentCountByVersionId.get(attachment.submission_version_id) ?? 0) + 1);
+    for (const attachment of (historyAttachmentsResult.data ??
+      []) as AttachmentCountRow[]) {
+      attachmentCountByVersionId.set(
+        attachment.submission_version_id,
+        (attachmentCountByVersionId.get(attachment.submission_version_id) ??
+          0) + 1,
+      );
     }
     history = historyVersions.flatMap((version): BranchBiHistoryEntry[] => {
       const submission = manualSubmissionById.get(version.submission_id);
@@ -367,28 +490,33 @@ async function getBranchBiSnapshotUncached(
       const branch = branchesById.get(submission.branch_id);
       const line = linesById.get(submission.business_line_id);
       if (!branch || !line) return [];
-      return [{
-        attachmentCount: attachmentCountByVersionId.get(version.id) ?? 0,
-        authorName: version.submitted_by ? profileNameById.get(version.submitted_by) ?? null : null,
-        branchId: branch.id,
-        branchName: branch.name,
-        businessLineId: line.id,
-        businessLineName: line.name,
-        createdAt: version.created_at,
-        periodStart: submission.period_start,
-        publishedAt: version.published_at,
-        status: version.status,
-        submissionId: submission.id,
-        validationSummary: version.validation_summary ?? {},
-        versionId: version.id,
-        versionNumber: version.version_number,
-      }];
+      return [
+        {
+          attachmentCount: attachmentCountByVersionId.get(version.id) ?? 0,
+          authorName: version.submitted_by
+            ? (profileNameById.get(version.submitted_by) ?? null)
+            : null,
+          branchId: branch.id,
+          branchName: branch.name,
+          businessLineId: line.id,
+          businessLineName: line.name,
+          createdAt: version.created_at,
+          periodStart: submission.period_start,
+          publishedAt: version.published_at,
+          status: version.status,
+          submissionId: submission.id,
+          validationSummary: version.validation_summary ?? {},
+          versionId: version.id,
+          versionNumber: version.version_number,
+        },
+      ];
     });
-    historyStatus = submissionsResult.error || historyVersionsResult.error
-      ? "source_error"
-      : history.length > 0
-        ? "available"
-        : "no_data";
+    historyStatus =
+      submissionsResult.error || historyVersionsResult.error
+        ? "source_error"
+        : history.length > 0
+          ? "available"
+          : "no_data";
   }
   const kpisByVersion = new Map<string, ClosingKpiRow[]>();
 
@@ -408,49 +536,91 @@ async function getBranchBiSnapshotUncached(
     rows.sort((left, right) => periodFor(left).localeCompare(periodFor(right)));
   }
 
-  const branchLineEntries: Array<[string, { branchId: string; businessLineId: string | null }]> = [
-    ...versions.map((version): [string, { branchId: string; businessLineId: string | null }] => [`${version.branch_id}:${version.business_line_id ?? "unassigned"}`, { branchId: version.branch_id, businessLineId: version.business_line_id }]),
-    ...context.monthlyAssignments.map((assignment): [string, { branchId: string; businessLineId: string | null }] => [assignment.id, { branchId: assignment.branch.id, businessLineId: assignment.businessLine.id }]),
+  const branchLineEntries: Array<
+    [string, { branchId: string; businessLineId: string | null }]
+  > = [
+    ...versions.map(
+      (
+        version,
+      ): [string, { branchId: string; businessLineId: string | null }] => [
+        `${version.branch_id}:${version.business_line_id ?? "unassigned"}`,
+        {
+          branchId: version.branch_id,
+          businessLineId: version.business_line_id,
+        },
+      ],
+    ),
+    ...context.monthlyAssignments.map(
+      (
+        assignment,
+      ): [string, { branchId: string; businessLineId: string | null }] => [
+        assignment.id,
+        {
+          branchId: assignment.branch.id,
+          businessLineId: assignment.businessLine.id,
+        },
+      ],
+    ),
     // Catalog branches remain visible before their first closing, at the one
     // applicable business line for their company.  Published versions above
     // add any additional branch+line combinations explicitly.
-    ...context.branches.flatMap((branch): Array<[string, { branchId: string; businessLineId: string | null }]> => context.businessLines
-      .filter((line) => line.parentId === branch.parentId)
-      .map((line) => [`${branch.id}:${line.id}`, { branchId: branch.id, businessLineId: line.id }])),
+    ...context.branches.flatMap(
+      (
+        branch,
+      ): Array<[string, { branchId: string; businessLineId: string | null }]> =>
+        context.businessLines
+          .filter((line) => line.parentId === branch.parentId)
+          .map((line) => [
+            `${branch.id}:${line.id}`,
+            { branchId: branch.id, businessLineId: line.id },
+          ]),
+    ),
   ];
   const branchLineKeys = Array.from(new Map(branchLineEntries).values());
   const records = branchLineKeys
     .flatMap(({ branchId, businessLineId }): BranchBiRecord[] => {
       const branch = branchesById.get(branchId);
       if (!branch) return [];
-      const branchLineVersions = versionsByBranchLine.get(`${branch.id}:${businessLineId ?? "unassigned"}`) ?? [];
+      const branchLineVersions =
+        versionsByBranchLine.get(
+          `${branch.id}:${businessLineId ?? "unassigned"}`,
+        ) ?? [];
       const latestVersion = branchLineVersions.at(-1) ?? null;
       const area = branch.operationalAreaId
         ? areasById.get(branch.operationalAreaId)
         : null;
-      const country = branch.countryId ? countriesById.get(branch.countryId) : null;
-      const line = businessLineId ? linesById.get(businessLineId) ?? null : null;
-      const latestMetrics: Partial<Record<BranchBiMetricKey, BranchBiMetric>> = {};
+      const country = branch.countryId
+        ? countriesById.get(branch.countryId)
+        : null;
+      const line = businessLineId
+        ? (linesById.get(businessLineId) ?? null)
+        : null;
+      const latestMetrics: Partial<Record<BranchBiMetricKey, BranchBiMetric>> =
+        {};
 
-      for (const kpi of latestVersion ? kpisByVersion.get(latestVersion.id) ?? [] : []) {
+      for (const kpi of latestVersion
+        ? (kpisByVersion.get(latestVersion.id) ?? [])
+        : []) {
         const key = metricKeyFor(kpi);
         const metric = metricFrom(kpi);
         if (key && metric && !latestMetrics[key]) latestMetrics[key] = metric;
       }
 
-      const trend = branchLineVersions
-        .map((version) => {
-          const revenue = (kpisByVersion.get(version.id) ?? [])
+      const trend = branchLineVersions.map((version) => {
+        const revenue =
+          (kpisByVersion.get(version.id) ?? [])
             .map((kpi) => ({ key: metricKeyFor(kpi), metric: metricFrom(kpi) }))
             .find((item) => item.key === "revenue")?.metric ?? null;
-          return { period: periodFor(version), revenue };
-        });
+        return { period: periodFor(version), revenue };
+      });
       const dataQuality = latestVersion
         ? asFiniteNumber(latestVersion.quality_score)
         : null;
 
       const branchManager = branchManagersByBranchId.get(branch.id) ?? null;
-      const areaManager = branch.operationalAreaId ? areaManagersByAreaId.get(branch.operationalAreaId) ?? null : null;
+      const areaManager = branch.operationalAreaId
+        ? (areaManagersByAreaId.get(branch.operationalAreaId) ?? null)
+        : null;
       const record: BranchBiRecord = {
         recordId: `${branch.id}:${businessLineId ?? "unassigned"}`,
         branchId: branch.id,
@@ -482,29 +652,53 @@ async function getBranchBiSnapshotUncached(
       };
       return [record];
     })
-    .filter((record) =>
-      (!hasScopedFilter(filter.countryId) || record.countryId === filter.countryId)
-      && (!hasScopedFilter(filter.companyId) || record.companyId === filter.companyId)
-      && (!hasScopedFilter(filter.businessLineId) || record.businessLineId === filter.businessLineId)
-      && (!hasScopedFilter(filter.areaId) || record.operationalAreaId === filter.areaId)
-      && (!hasScopedFilter(filter.branchId) || record.branchId === filter.branchId)
-      && (!hasScopedFilter(filter.managerId) || record.branchManagerId === filter.managerId || record.areaManagerId === filter.managerId),
+    .filter(
+      (record) =>
+        (!hasScopedFilter(filter.countryId) ||
+          record.countryId === filter.countryId) &&
+        (!hasScopedFilter(filter.companyId) ||
+          record.companyId === filter.companyId) &&
+        (!hasScopedFilter(filter.businessLineId) ||
+          record.businessLineId === filter.businessLineId) &&
+        (!hasScopedFilter(filter.areaId) ||
+          record.operationalAreaId === filter.areaId) &&
+        (!hasScopedFilter(filter.branchId) ||
+          record.branchId === filter.branchId) &&
+        (!hasScopedFilter(filter.managerId) ||
+          record.branchManagerId === filter.managerId ||
+          record.areaManagerId === filter.managerId),
     )
-    .sort((left, right) => left.branchName.localeCompare(right.branchName, "es"));
-  const namesByBranchId = new Map(records.map((record) => [record.branchId, record.branchName]));
+    .sort((left, right) =>
+      left.branchName.localeCompare(right.branchName, "es"),
+    );
+  const namesByBranchId = new Map(
+    records.map((record) => [record.branchId, record.branchName]),
+  );
   const insights = ((insightsResult.data ?? []) as InsightRow[])
-    .filter((insight) => !insight.branch_id || namesByBranchId.has(insight.branch_id))
+    .filter(
+      (insight) => !insight.branch_id || namesByBranchId.has(insight.branch_id),
+    )
     .map((insight) => ({
-    branchId: insight.branch_id,
-    branchName: insight.branch_id ? namesByBranchId.get(insight.branch_id) ?? null : null,
-    message: insight.summary,
-    recommendedAction: insight.recommended_action,
-    severity: insight.severity,
-    title: insight.title,
-  }));
+      branchId: insight.branch_id,
+      branchName: insight.branch_id
+        ? (namesByBranchId.get(insight.branch_id) ?? null)
+        : null,
+      message: insight.summary,
+      recommendedAction: insight.recommended_action,
+      severity: insight.severity,
+      title: insight.title,
+    }));
 
   const kpiSourceAvailable = !("error" in kpisResult) || !kpisResult.error;
-  return { generatedAt, history, historyStatus, insights, records, sourceAvailable: !versionsResult.error && kpiSourceAvailable, sourceTables };
+  return {
+    generatedAt,
+    history,
+    historyStatus,
+    insights,
+    records,
+    sourceAvailable: !versionsResult.error && kpiSourceAvailable,
+    sourceTables,
+  };
 }
 
 /** React cache is request scoped here; no tenant data is shared between actors. */

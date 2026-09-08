@@ -65,10 +65,7 @@ function coerceRoleKey(value: string | null | undefined): RoleKey {
   return roleKeys.includes(value as RoleKey) ? (value as RoleKey) : "viewer";
 }
 
-function pickRole(
-  assignments: UserRoleRow[],
-  rolesById: Map<string, RoleKey>,
-) {
+function pickRole(assignments: UserRoleRow[], rolesById: Map<string, RoleKey>) {
   const activeAssignments = assignments.filter(
     (assignment) => !assignment.status || assignment.status === "active",
   );
@@ -79,7 +76,8 @@ function pickRole(
     }))
     .sort(
       (left, right) =>
-        rolePriority.indexOf(left.roleKey) - rolePriority.indexOf(right.roleKey),
+        rolePriority.indexOf(left.roleKey) -
+        rolePriority.indexOf(right.roleKey),
     );
 
   return ranked[0] ?? null;
@@ -116,9 +114,7 @@ async function readBranch(branchId: string | null) {
 
   const extended = await admin
     .from("branches")
-    .select(
-      "id, name, code, city, country_id, company_id, operational_area_id",
-    )
+    .select("id, name, code, city, country_id, company_id, operational_area_id")
     .eq("id", branchId)
     .maybeSingle();
 
@@ -159,7 +155,7 @@ export async function getSupabaseDirectoryUserAccess(
 
   if (!admin) return null;
 
-  const [profileResult, assignments] = await Promise.all([
+  const [profileResult, assignments, rolesResult] = await Promise.all([
     admin
       .from("profiles")
       .select(
@@ -168,6 +164,10 @@ export async function getSupabaseDirectoryUserAccess(
       .eq("id", userId)
       .maybeSingle(),
     readUserRoles(userId),
+    // Roles are a small, server-only catalog. Reading them with the profile
+    // and assignments removes a dependent authorization round trip without
+    // broadening the actor's scope.
+    admin.from("roles").select("id, key"),
   ]);
 
   if (profileResult.error || !profileResult.data) {
@@ -180,10 +180,6 @@ export async function getSupabaseDirectoryUserAccess(
     return null;
   }
 
-  const roleIds = Array.from(new Set(assignments.map((item) => item.role_id)));
-  const rolesResult = roleIds.length
-    ? await admin.from("roles").select("id, key").in("id", roleIds)
-    : { data: [] as RoleRow[], error: null };
   const rolesById = new Map<string, RoleKey>(
     ((rolesResult.data ?? []) as RoleRow[]).map((role) => [
       role.id,
@@ -196,11 +192,18 @@ export async function getSupabaseDirectoryUserAccess(
 
   const branchId = assignment?.branch_id ?? profile.default_branch_id ?? null;
   const branch = await readBranch(branchId);
-  const organizationId = assignment?.organization_id ?? profile.organization_id ?? null;
+  const organizationId =
+    assignment?.organization_id ?? profile.organization_id ?? null;
   const countryId =
-    assignment?.country_id ?? profile.default_country_id ?? branch?.country_id ?? null;
+    assignment?.country_id ??
+    profile.default_country_id ??
+    branch?.country_id ??
+    null;
   const companyId =
-    assignment?.company_id ?? profile.default_company_id ?? branch?.company_id ?? null;
+    assignment?.company_id ??
+    profile.default_company_id ??
+    branch?.company_id ??
+    null;
   const operationalAreaId =
     assignment?.operational_area_id ?? branch?.operational_area_id ?? null;
 

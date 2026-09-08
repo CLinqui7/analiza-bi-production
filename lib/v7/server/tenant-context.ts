@@ -77,7 +77,12 @@ type AreaRow = {
   country_id: string;
   manager_profile_id: string | null;
 };
-type LineRow = { id: string; name: string; code: string; company_id: string | null };
+type LineRow = {
+  id: string;
+  name: string;
+  code: string;
+  company_id: string | null;
+};
 type BranchManagerRow = {
   id: string;
   branch_id: string;
@@ -87,7 +92,12 @@ type BranchManagerRow = {
   starts_on: string | null;
   ends_on: string | null;
 };
-type ProfileRow = { id: string; display_name: string | null; email: string | null; status: string };
+type ProfileRow = {
+  id: string;
+  display_name: string | null;
+  email: string | null;
+  status: string;
+};
 type ManagerAssignmentRow = {
   branch_id: string | null;
   operational_area_id: string | null;
@@ -106,15 +116,18 @@ function grantsFor(actor: Actor) {
 
 function matchesGrant(grant: ScopeBoundary, target: ScopeBoundary) {
   return (
-    grant.organizationId === target.organizationId
-    && (!grant.countryId || grant.countryId === target.countryId)
-    && (!grant.companyId || grant.companyId === target.companyId)
-    && (!grant.operationalAreaId || grant.operationalAreaId === target.operationalAreaId)
-    && (!grant.branchId || grant.branchId === target.branchId)
+    grant.organizationId === target.organizationId &&
+    (!grant.countryId || grant.countryId === target.countryId) &&
+    (!grant.companyId || grant.companyId === target.companyId) &&
+    (!grant.operationalAreaId ||
+      grant.operationalAreaId === target.operationalAreaId) &&
+    (!grant.branchId || grant.branchId === target.branchId) &&
     // A branch catalogue row has no business-line dimension. It can identify
     // an assigned branch, but it must not reject that branch merely because
     // the grant is line-specific; downstream records retain line checks.
-    && (!grant.businessLineId || !target.businessLineId || grant.businessLineId === target.businessLineId)
+    (!grant.businessLineId ||
+      !target.businessLineId ||
+      grant.businessLineId === target.businessLineId)
   );
 }
 
@@ -142,7 +155,9 @@ function reportingMonths(reference = new Date()) {
   });
 
   return Array.from({ length: 36 }, (_, offset) => {
-    const date = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() - offset, 1));
+    const date = new Date(
+      Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth() - offset, 1),
+    );
     const id = `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, "0")}`;
     const formatted = formatter.format(date);
     return {
@@ -153,14 +168,30 @@ function reportingMonths(reference = new Date()) {
   });
 }
 
-async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantContextOptions> {
+async function getTenantContextOptionsUncached(
+  actor: Actor,
+  includeDirectoryProfiles = true,
+): Promise<TenantContextOptions> {
   if (actor.isDemo) {
     return {
-      countries: demoCountries.map((item) => ({ id: item.id, name: item.name, code: item.iso2 })),
-      companies: demoCompanies.map((item) => ({ id: item.id, name: item.name, code: item.key })),
+      countries: demoCountries.map((item) => ({
+        id: item.id,
+        name: item.name,
+        code: item.iso2,
+      })),
+      companies: demoCompanies.map((item) => ({
+        id: item.id,
+        name: item.name,
+        code: item.key,
+      })),
       businessLines: demoBusinessLineOptions
         .filter((item) => item.code !== "CONSOLIDATED")
-        .map((item) => ({ id: item.id, name: item.name, code: item.code, parentId: item.companyId })),
+        .map((item) => ({
+          id: item.id,
+          name: item.name,
+          code: item.code,
+          parentId: item.companyId,
+        })),
       operationalAreas: [],
       branches: demoBranches.map((item) => ({
         id: item.id,
@@ -189,14 +220,57 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
   // A branch manager with only concrete branch grants must not download the
   // organization directory merely to render a monthly form. Broader grants
   // deliberately retain the existing catalog path and are filtered below.
-  const branchGrantIds = Array.from(new Set(
-    actorGrants.map((grant) => grant.branchId).filter((id): id is string => Boolean(id)),
-  ));
-  const lineGrantIds = Array.from(new Set(
-    actorGrants.map((grant) => grant.businessLineId).filter((id): id is string => Boolean(id)),
-  ));
-  const hasOnlyConcreteBranchGrants = !isGlobal && branchGrantIds.length > 0
-    && actorGrants.every((grant) => Boolean(grant.branchId));
+  const branchGrantIds = Array.from(
+    new Set(
+      actorGrants
+        .map((grant) => grant.branchId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const lineGrantIds = Array.from(
+    new Set(
+      actorGrants
+        .map((grant) => grant.businessLineId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const countryGrantIds = Array.from(
+    new Set(
+      actorGrants
+        .map((grant) => grant.countryId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const companyGrantIds = Array.from(
+    new Set(
+      actorGrants
+        .map((grant) => grant.companyId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const operationalAreaGrantIds = Array.from(
+    new Set(
+      actorGrants
+        .map((grant) => grant.operationalAreaId)
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const hasOnlyConcreteBranchGrants =
+    !isGlobal &&
+    branchGrantIds.length > 0 &&
+    actorGrants.every((grant) => Boolean(grant.branchId));
+  const canRestrictCountries =
+    hasOnlyConcreteBranchGrants &&
+    countryGrantIds.length > 0 &&
+    actorGrants.every((grant) => Boolean(grant.countryId));
+  const canRestrictCompanies =
+    hasOnlyConcreteBranchGrants &&
+    companyGrantIds.length > 0 &&
+    actorGrants.every((grant) => Boolean(grant.companyId));
+  const canRestrictOperationalAreas =
+    hasOnlyConcreteBranchGrants &&
+    operationalAreaGrantIds.length > 0 &&
+    actorGrants.every((grant) => Boolean(grant.operationalAreaId));
 
   const [
     countriesResult,
@@ -208,27 +282,77 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
     managerAssignmentsResult,
     rolesResult,
   ] = await Promise.all([
-    supabase.from("countries").select("id,name,iso2").eq("organization_id", organizationId).order("name"),
-    supabase.from("companies").select("id,name,key").eq("organization_id", organizationId).order("name"),
     (() => {
-      let query = supabase.from("business_lines").select("id,name,code,company_id").eq("organization_id", organizationId).eq("is_enabled", true);
-      if (hasOnlyConcreteBranchGrants && lineGrantIds.length > 0 && actorGrants.every((grant) => Boolean(grant.businessLineId))) query = query.in("id", lineGrantIds);
+      let query = supabase
+        .from("countries")
+        .select("id,name,iso2")
+        .eq("organization_id", organizationId);
+      if (canRestrictCountries) query = query.in("id", countryGrantIds);
       return query.order("name");
     })(),
-    supabase.from("operational_areas").select("id,name,code,company_id,country_id,manager_profile_id").eq("organization_id", organizationId).eq("status", "active").order("name"),
     (() => {
-      let query = supabase.from("branches").select("id,name,code,company_id,country_id,operational_area_id,city,status").eq("organization_id", organizationId).in("status", ["active", "pending_manager"]);
+      let query = supabase
+        .from("companies")
+        .select("id,name,key")
+        .eq("organization_id", organizationId);
+      if (canRestrictCompanies) query = query.in("id", companyGrantIds);
+      return query.order("name");
+    })(),
+    (() => {
+      let query = supabase
+        .from("business_lines")
+        .select("id,name,code,company_id")
+        .eq("organization_id", organizationId)
+        .eq("is_enabled", true);
+      if (
+        hasOnlyConcreteBranchGrants &&
+        lineGrantIds.length > 0 &&
+        actorGrants.every((grant) => Boolean(grant.businessLineId))
+      )
+        query = query.in("id", lineGrantIds);
+      return query.order("name");
+    })(),
+    (() => {
+      let query = supabase
+        .from("operational_areas")
+        .select("id,name,code,company_id,country_id,manager_profile_id")
+        .eq("organization_id", organizationId)
+        .eq("status", "active");
+      if (canRestrictOperationalAreas) {
+        query = query.in("id", operationalAreaGrantIds);
+      }
+      return query.order("name");
+    })(),
+    (() => {
+      let query = supabase
+        .from("branches")
+        .select(
+          "id,name,code,company_id,country_id,operational_area_id,city,status",
+        )
+        .eq("organization_id", organizationId)
+        .in("status", ["active", "pending_manager"]);
       if (hasOnlyConcreteBranchGrants) query = query.in("id", branchGrantIds);
       return query.order("name");
     })(),
     (() => {
-      let query = supabase.from("branch_managers").select("id,branch_id,profile_id,display_name,email,starts_on,ends_on").eq("organization_id", organizationId).eq("is_demo", false);
-      if (hasOnlyConcreteBranchGrants) query = query.in("branch_id", branchGrantIds);
+      let query = supabase
+        .from("branch_managers")
+        .select("id,branch_id,profile_id,display_name,email,starts_on,ends_on")
+        .eq("organization_id", organizationId)
+        .eq("is_demo", false);
+      if (hasOnlyConcreteBranchGrants)
+        query = query.in("branch_id", branchGrantIds);
       return query.order("display_name");
     })(),
     (() => {
-      let query = supabase.from("manager_assignments").select("profile_id,role_id,operational_area_id,branch_id").eq("organization_id", organizationId).eq("status", "active").is("deactivated_at", null);
-      if (hasOnlyConcreteBranchGrants) query = query.in("branch_id", branchGrantIds);
+      let query = supabase
+        .from("manager_assignments")
+        .select("profile_id,role_id,operational_area_id,branch_id")
+        .eq("organization_id", organizationId)
+        .eq("status", "active")
+        .is("deactivated_at", null);
+      if (hasOnlyConcreteBranchGrants)
+        query = query.in("branch_id", branchGrantIds);
       return query;
     })(),
     supabase.from("roles").select("id,key"),
@@ -239,32 +363,37 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
   const lines = (linesResult.data ?? []) as LineRow[];
   const areas = (areasResult.data ?? []) as AreaRow[];
   const branches = (branchesResult.data ?? []) as BranchRow[];
-  const branchManagerRows = (branchManagersResult.data ?? []) as BranchManagerRow[];
-  const managerAssignmentRows = (managerAssignmentsResult.data ?? []) as ManagerAssignmentRow[];
+  const branchManagerRows = (branchManagersResult.data ??
+    []) as BranchManagerRow[];
+  const managerAssignmentRows = (managerAssignmentsResult.data ??
+    []) as ManagerAssignmentRow[];
   const roleKeyById = new Map(
     ((rolesResult.data ?? []) as RoleRow[]).map((role) => [role.id, role.key]),
   );
 
-  const visibleBranches = branches.filter((item) => actorCanSee(actor, {
-    organizationId,
-    countryId: item.country_id,
-    companyId: item.company_id,
-    operationalAreaId: item.operational_area_id,
-    branchId: item.id,
-  }));
+  const visibleBranches = branches.filter((item) =>
+    actorCanSee(actor, {
+      organizationId,
+      countryId: item.country_id,
+      companyId: item.company_id,
+      operationalAreaId: item.operational_area_id,
+      branchId: item.id,
+    }),
+  );
   const visibleBranchAreaIds = new Set(
     visibleBranches
       .map((item) => item.operational_area_id)
       .filter((value): value is string => Boolean(value)),
   );
-  const visibleAreas = areas.filter((item) =>
-    visibleBranchAreaIds.has(item.id)
-    || actorCanSee(actor, {
-      organizationId,
-      countryId: item.country_id,
-      companyId: item.company_id,
-      operationalAreaId: item.id,
-    }),
+  const visibleAreas = areas.filter(
+    (item) =>
+      visibleBranchAreaIds.has(item.id) ||
+      actorCanSee(actor, {
+        organizationId,
+        countryId: item.country_id,
+        companyId: item.company_id,
+        operationalAreaId: item.id,
+      }),
   );
 
   const visibleBranchIds = new Set(visibleBranches.map((item) => item.id));
@@ -284,49 +413,87 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
   const visibleCountries = isGlobal
     ? countries
     : countries.filter((item) => visibleCountryIds.has(item.id));
-  const visibleLines = lines.filter((item) => !item.company_id || isGlobal || allowedCompanyIds.has(item.company_id));
+  const visibleLines = lines.filter(
+    (item) =>
+      !item.company_id || isGlobal || allowedCompanyIds.has(item.company_id),
+  );
 
-  const areaManagerIds = Array.from(new Set(
-    visibleAreas.map((item) => item.manager_profile_id).filter((value): value is string => Boolean(value)),
-  ));
-  const branchManagerProfileIds = Array.from(new Set(
-    branchManagerRows
-      .filter((item) => visibleBranchIds.has(item.branch_id))
-      .map((item) => item.profile_id)
-      .filter((value): value is string => Boolean(value)),
-  ));
+  const areaManagerIds = Array.from(
+    new Set(
+      visibleAreas
+        .map((item) => item.manager_profile_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
+  const branchManagerProfileIds = Array.from(
+    new Set(
+      branchManagerRows
+        .filter((item) => visibleBranchIds.has(item.branch_id))
+        .map((item) => item.profile_id)
+        .filter((value): value is string => Boolean(value)),
+    ),
+  );
   const assignmentProfileIds = managerAssignmentRows
-    .filter((assignment) => ["gerente_area", "gerente_sucursal"].includes(roleKeyById.get(assignment.role_id) ?? ""))
+    .filter((assignment) =>
+      ["gerente_area", "gerente_sucursal"].includes(
+        roleKeyById.get(assignment.role_id) ?? "",
+      ),
+    )
     .map((assignment) => assignment.profile_id);
-  const profileIds = Array.from(new Set([...areaManagerIds, ...branchManagerProfileIds, ...assignmentProfileIds, actor.userId]));
-  const profilesResult = profileIds.length > 0
-    ? await supabase.from("profiles").select("id,display_name,email,status").in("id", profileIds)
-    : { data: [] };
+  const profileIds = Array.from(
+    new Set([
+      ...areaManagerIds,
+      ...branchManagerProfileIds,
+      ...assignmentProfileIds,
+      actor.userId,
+    ]),
+  );
+  // Summary and history snapshots consume IDs plus the display data already
+  // present in branch assignments. They do not need a second profile lookup;
+  // interactive directory and form paths retain it for names and email.
+  const profilesResult =
+    includeDirectoryProfiles && profileIds.length > 0
+      ? await supabase
+          .from("profiles")
+          .select("id,display_name,email,status")
+          .in("id", profileIds)
+      : { data: [] };
   const profiles = (profilesResult.data ?? []) as ProfileRow[];
   const profileById = new Map(profiles.map((item) => [item.id, item]));
 
   const today = new Date().toISOString().slice(0, 10);
   const branchManagers: ManagerOption[] = [
     ...branchManagerRows
-    .filter((item) => visibleBranchIds.has(item.branch_id))
-    .filter((item) => !item.ends_on || item.ends_on >= today)
-    .map((item) => {
-      const profile = item.profile_id ? profileById.get(item.profile_id) : null;
-      return {
-        id: item.profile_id ?? item.id,
-        name: profile?.display_name ?? item.display_name,
-        email: profile?.email ?? item.email,
-        branchId: item.branch_id,
-      };
-    }),
+      .filter((item) => visibleBranchIds.has(item.branch_id))
+      .filter((item) => !item.ends_on || item.ends_on >= today)
+      .map((item) => {
+        const profile = item.profile_id
+          ? profileById.get(item.profile_id)
+          : null;
+        return {
+          id: item.profile_id ?? item.id,
+          name: profile?.display_name ?? item.display_name,
+          email: profile?.email ?? item.email,
+          branchId: item.branch_id,
+        };
+      }),
     ...managerAssignmentRows
-      .filter((assignment) => roleKeyById.get(assignment.role_id) === "gerente_sucursal")
-      .filter((assignment) => assignment.branch_id && visibleBranchIds.has(assignment.branch_id))
+      .filter(
+        (assignment) =>
+          roleKeyById.get(assignment.role_id) === "gerente_sucursal",
+      )
+      .filter(
+        (assignment) =>
+          assignment.branch_id && visibleBranchIds.has(assignment.branch_id),
+      )
       .map((assignment) => {
         const profile = profileById.get(assignment.profile_id);
         return {
           id: assignment.profile_id,
-          name: profile?.display_name?.trim() || profile?.email || "Gerente de sucursal asignado",
+          name:
+            profile?.display_name?.trim() ||
+            profile?.email ||
+            "Gerente de sucursal asignado",
           email: profile?.email ?? null,
           branchId: assignment.branch_id ?? undefined,
         };
@@ -335,24 +502,33 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
 
   const areaManagers: ManagerOption[] = [
     ...visibleAreas
-    .filter((item) => item.manager_profile_id)
-    .map((item) => {
-      const profile = profileById.get(item.manager_profile_id!);
-      return {
-        id: item.manager_profile_id!,
-        name: profile?.display_name ?? "Gerente de área pendiente",
-        email: profile?.email ?? null,
-        operationalAreaId: item.id,
-      };
-    }),
+      .filter((item) => item.manager_profile_id)
+      .map((item) => {
+        const profile = profileById.get(item.manager_profile_id!);
+        return {
+          id: item.manager_profile_id!,
+          name: profile?.display_name ?? "Gerente de área pendiente",
+          email: profile?.email ?? null,
+          operationalAreaId: item.id,
+        };
+      }),
     ...managerAssignmentRows
-      .filter((assignment) => roleKeyById.get(assignment.role_id) === "gerente_area")
-      .filter((assignment) => assignment.operational_area_id && visibleBranchAreaIds.has(assignment.operational_area_id))
+      .filter(
+        (assignment) => roleKeyById.get(assignment.role_id) === "gerente_area",
+      )
+      .filter(
+        (assignment) =>
+          assignment.operational_area_id &&
+          visibleBranchAreaIds.has(assignment.operational_area_id),
+      )
       .map((assignment) => {
         const profile = profileById.get(assignment.profile_id);
         return {
           id: assignment.profile_id,
-          name: profile?.display_name?.trim() || profile?.email || "Gerente de área asignado",
+          name:
+            profile?.display_name?.trim() ||
+            profile?.email ||
+            "Gerente de área asignado",
           email: profile?.email ?? null,
           operationalAreaId: assignment.operational_area_id ?? undefined,
         };
@@ -367,49 +543,123 @@ async function getTenantContextOptionsUncached(actor: Actor): Promise<TenantCont
   const actorProfile = profileById.get(actor.userId);
   const ownManager: ManagerOption = {
     id: actor.userId,
-    name: actorProfile?.display_name?.trim() || actor.displayName || "Gerente de sucursal",
+    name:
+      actorProfile?.display_name?.trim() ||
+      actor.displayName ||
+      "Gerente de sucursal",
     email: actorProfile?.email ?? actor.email,
   };
-  const monthlyAssignments = actor.roleKey !== "gerente_sucursal"
-    ? []
-    : Array.from(new Map(
-      grantsFor(actor)
-        .filter((grant) => Boolean(grant.branchId && grant.businessLineId))
-        .flatMap((grant) => {
-          const branch = grant.branchId ? branchById.get(grant.branchId) : null;
-          const line = grant.businessLineId ? lineById.get(grant.businessLineId) : null;
-          const country = branch ? countryById.get(branch.country_id) : null;
-          const company = branch ? companyById.get(branch.company_id) : null;
-          const area = branch?.operational_area_id ? areaById.get(branch.operational_area_id) : null;
-          if (!branch || !line || !country || !company || !actorCanSee(actor, {
-            organizationId,
-            countryId: branch.country_id,
-            companyId: branch.company_id,
-            operationalAreaId: branch.operational_area_id,
-            branchId: branch.id,
-            businessLineId: line.id,
-          })) return [];
-          const areaManager = area?.manager_profile_id
-            ? areaManagers.find((item) => item.id === area.manager_profile_id) ?? null
-            : null;
-          const assignment: MonthlyAssignment = {
-            id: `${branch.id}:${line.id}`,
-            country: { id: country.id, name: country.name, code: country.iso2 },
-            company: { id: company.id, name: company.name, code: company.key },
-            operationalArea: area ? { id: area.id, name: area.name, code: area.code, parentId: area.company_id, countryId: area.country_id } : null,
-            branch: { id: branch.id, name: branch.name, code: branch.code, parentId: branch.company_id, countryId: branch.country_id, operationalAreaId: branch.operational_area_id, city: branch.city, status: branch.status },
-            businessLine: { id: line.id, name: line.name, code: line.code, parentId: line.company_id },
-            branchManager: ownManager,
-            areaManager,
-          };
-          return [[assignment.id, assignment] as const];
-        }),
-    ).values()).sort((left, right) => left.branch.name.localeCompare(right.branch.name) || left.businessLine.name.localeCompare(right.businessLine.name));
+  const monthlyAssignments =
+    actor.roleKey !== "gerente_sucursal"
+      ? []
+      : Array.from(
+          new Map(
+            grantsFor(actor)
+              .filter((grant) =>
+                Boolean(grant.branchId && grant.businessLineId),
+              )
+              .flatMap((grant) => {
+                const branch = grant.branchId
+                  ? branchById.get(grant.branchId)
+                  : null;
+                const line = grant.businessLineId
+                  ? lineById.get(grant.businessLineId)
+                  : null;
+                const country = branch
+                  ? countryById.get(branch.country_id)
+                  : null;
+                const company = branch
+                  ? companyById.get(branch.company_id)
+                  : null;
+                const area = branch?.operational_area_id
+                  ? areaById.get(branch.operational_area_id)
+                  : null;
+                if (
+                  !branch ||
+                  !line ||
+                  !country ||
+                  !company ||
+                  !actorCanSee(actor, {
+                    organizationId,
+                    countryId: branch.country_id,
+                    companyId: branch.company_id,
+                    operationalAreaId: branch.operational_area_id,
+                    branchId: branch.id,
+                    businessLineId: line.id,
+                  })
+                )
+                  return [];
+                const areaManager = area?.manager_profile_id
+                  ? (areaManagers.find(
+                      (item) => item.id === area.manager_profile_id,
+                    ) ?? null)
+                  : null;
+                const assignment: MonthlyAssignment = {
+                  id: `${branch.id}:${line.id}`,
+                  country: {
+                    id: country.id,
+                    name: country.name,
+                    code: country.iso2,
+                  },
+                  company: {
+                    id: company.id,
+                    name: company.name,
+                    code: company.key,
+                  },
+                  operationalArea: area
+                    ? {
+                        id: area.id,
+                        name: area.name,
+                        code: area.code,
+                        parentId: area.company_id,
+                        countryId: area.country_id,
+                      }
+                    : null,
+                  branch: {
+                    id: branch.id,
+                    name: branch.name,
+                    code: branch.code,
+                    parentId: branch.company_id,
+                    countryId: branch.country_id,
+                    operationalAreaId: branch.operational_area_id,
+                    city: branch.city,
+                    status: branch.status,
+                  },
+                  businessLine: {
+                    id: line.id,
+                    name: line.name,
+                    code: line.code,
+                    parentId: line.company_id,
+                  },
+                  branchManager: ownManager,
+                  areaManager,
+                };
+                return [[assignment.id, assignment] as const];
+              }),
+          ).values(),
+        ).sort(
+          (left, right) =>
+            left.branch.name.localeCompare(right.branch.name) ||
+            left.businessLine.name.localeCompare(right.businessLine.name),
+        );
 
   return {
-    countries: visibleCountries.map((item) => ({ id: item.id, name: item.name, code: item.iso2 })),
-    companies: visibleCompanies.map((item) => ({ id: item.id, name: item.name, code: item.key })),
-    businessLines: visibleLines.map((item) => ({ id: item.id, name: item.name, code: item.code, parentId: item.company_id })),
+    countries: visibleCountries.map((item) => ({
+      id: item.id,
+      name: item.name,
+      code: item.iso2,
+    })),
+    companies: visibleCompanies.map((item) => ({
+      id: item.id,
+      name: item.name,
+      code: item.key,
+    })),
+    businessLines: visibleLines.map((item) => ({
+      id: item.id,
+      name: item.name,
+      code: item.code,
+      parentId: item.company_id,
+    })),
     operationalAreas: visibleAreas.map((item) => ({
       id: item.id,
       name: item.name,
