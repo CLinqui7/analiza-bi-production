@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { connection } from "next/server";
+import { Suspense } from "react";
 
 import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard";
 import { BusinessModuleDashboard } from "@/components/business-module-dashboard";
@@ -17,12 +18,14 @@ import { OperationsModule } from "@/components/operations-modules";
 import { PatientFlowDemandDashboard } from "@/components/patient-flow-demand-dashboard";
 import { PhysiotherapyPresentationDashboard } from "@/components/physiotherapy-presentation-dashboard";
 import { ProfessionalPerformanceDashboard } from "@/components/professional-performance-dashboard";
+import { ProtectedRouteLoading } from "@/components/protected-route-loading";
 import { ServicePortfolioDashboard } from "@/components/service-portfolio-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { moduleConfigs } from "@/lib/analytics/demo-business-modules";
 import { navigationItems } from "@/lib/navigation";
 import { requireProtectedPath } from "@/lib/server/authorization";
 import { getOfficialExecutiveSnapshot } from "@/lib/server/official-bi";
+import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
 
 type ModulePageProps = {
@@ -41,9 +44,7 @@ type ModulePageProps = {
   }>;
 };
 
-const operationsModuleSlugs = [
-  "gerentes",
-] as const;
+const operationsModuleSlugs = ["gerentes"] as const;
 const staticProtectedModuleSlugs = new Set([
   "cierres",
   "mi-sucursal",
@@ -63,13 +64,18 @@ export function generateStaticParams() {
     }));
 }
 
-async function renderOfficialDataModule(
-  mode: "finances" | "insights" | "overview" | "targets",
-  actor: Awaited<ReturnType<typeof requireProtectedPath>>,
-  searchParams: ModulePageProps["searchParams"],
+type OfficialDataModuleMode = "finances" | "insights" | "overview" | "targets";
+
+type OfficialDataModuleProps = {
+  actor: AuthorizationActor;
+  mode: OfficialDataModuleMode;
+  searchParams: ModulePageProps["searchParams"];
+};
+
+function officialFilterFromParams(
+  params: Awaited<NonNullable<ModulePageProps["searchParams"]>>,
 ) {
-  const params = searchParams ? await searchParams : {};
-  const snapshot = await getOfficialExecutiveSnapshot(actor, {
+  return {
     areaId: params.area,
     branchId: params.branch,
     businessLineId: params.line,
@@ -78,12 +84,82 @@ async function renderOfficialDataModule(
     managerId: params.manager,
     periodEnd: params.to,
     periodStart: params.from,
-  });
-  const { OfficialExecutiveDataDashboard } = await import(
-    "@/components/official-executive-data-dashboard"
-  );
+  };
+}
 
-  return <OfficialExecutiveDataDashboard mode={mode} snapshot={snapshot} />;
+async function OfficialDataModule({
+  actor,
+  mode,
+  searchParams,
+}: OfficialDataModuleProps) {
+  const params = searchParams ? await searchParams : {};
+  const snapshot = await getOfficialExecutiveSnapshot(
+    actor,
+    officialFilterFromParams(params),
+  );
+  const { OfficialExecutiveDataDashboard } =
+    await import("@/components/official-executive-data-dashboard");
+
+  return (
+    <div data-route-content-ready={`official-${mode}`}>
+      <OfficialExecutiveDataDashboard mode={mode} snapshot={snapshot} />
+    </div>
+  );
+}
+
+function renderOfficialDataModule(
+  mode: "finances" | "insights" | "overview" | "targets",
+  actor: AuthorizationActor,
+  searchParams: ModulePageProps["searchParams"],
+) {
+  const labelByMode: Record<OfficialDataModuleMode, string> = {
+    finances: "salud financiera oficial",
+    insights: "insights oficiales",
+    overview: "operación ejecutiva oficial",
+    targets: "metas oficiales",
+  };
+
+  return (
+    <Suspense fallback={<ProtectedRouteLoading label={labelByMode[mode]} />}>
+      <OfficialDataModule
+        actor={actor}
+        mode={mode}
+        searchParams={searchParams}
+      />
+    </Suspense>
+  );
+}
+
+async function OfficialDataQualityModule({
+  actor,
+  searchParams,
+}: Omit<OfficialDataModuleProps, "mode">) {
+  const params = searchParams ? await searchParams : {};
+  const snapshot = await getOfficialExecutiveSnapshot(
+    actor,
+    officialFilterFromParams(params),
+  );
+  const { OfficialDataQualityDashboard } =
+    await import("@/components/official-data-quality-dashboard");
+
+  return (
+    <div data-route-content-ready="official-data-quality">
+      <OfficialDataQualityDashboard snapshot={snapshot} />
+    </div>
+  );
+}
+
+function renderOfficialDataQualityDashboard(
+  actor: AuthorizationActor,
+  searchParams: ModulePageProps["searchParams"],
+) {
+  return (
+    <Suspense
+      fallback={<ProtectedRouteLoading label="calidad de datos oficial" />}
+    >
+      <OfficialDataQualityModule actor={actor} searchParams={searchParams} />
+    </Suspense>
+  );
 }
 
 export default async function ModulePage({
@@ -115,7 +191,22 @@ export default async function ModulePage({
 
   if (module === "sucursales") {
     const context = searchParams ? await searchParams : {};
-    return <BranchBiServerDashboard actor={actor} filter={{ areaId: context.area, branchId: context.branch, businessLineId: context.line, companyId: context.company, countryId: context.country, managerId: context.manager, periodStart: context.from, periodEnd: context.to }} mode="branches" />;
+    return (
+      <BranchBiServerDashboard
+        actor={actor}
+        filter={{
+          areaId: context.area,
+          branchId: context.branch,
+          businessLineId: context.line,
+          companyId: context.company,
+          countryId: context.country,
+          managerId: context.manager,
+          periodStart: context.from,
+          periodEnd: context.to,
+        }}
+        mode="branches"
+      />
+    );
   }
 
   if (module === "profesionales") {
@@ -143,9 +234,8 @@ export default async function ModulePage({
       return renderOfficialDataModule("insights", actor, searchParams);
     }
 
-    const { InsightsIntelligenceDashboard } = await import(
-      "@/components/insights-intelligence-dashboard"
-    );
+    const { InsightsIntelligenceDashboard } =
+      await import("@/components/insights-intelligence-dashboard");
 
     return <InsightsIntelligenceDashboard />;
   }
@@ -162,11 +252,13 @@ export default async function ModulePage({
     const resolvedSearchParams = searchParams ? await searchParams : {};
 
     return (
-      <MonthlyClosureRouter
-        actor={actor}
-        line={resolvedSearchParams.line}
-        mode="new-closure"
-      />
+      <div data-route-content-ready="new-closure">
+        <MonthlyClosureRouter
+          actor={actor}
+          line={resolvedSearchParams.line}
+          mode="new-closure"
+        />
+      </div>
     );
   }
 
@@ -176,21 +268,7 @@ export default async function ModulePage({
 
   if (module === "calidad-datos") {
     if (!isDemoRuntimeEnvironment()) {
-      const params = searchParams ? await searchParams : {};
-      const snapshot = await getOfficialExecutiveSnapshot(actor, {
-        areaId: params.area,
-        branchId: params.branch,
-        businessLineId: params.line,
-        companyId: params.company,
-        countryId: params.country,
-        managerId: params.manager,
-        periodEnd: params.to,
-        periodStart: params.from,
-      });
-      const { OfficialDataQualityDashboard } = await import(
-        "@/components/official-data-quality-dashboard"
-      );
-      return <OfficialDataQualityDashboard snapshot={snapshot} />;
+      return renderOfficialDataQualityDashboard(actor, searchParams);
     }
 
     return <DataQualityAnaliaDashboard />;
@@ -201,9 +279,8 @@ export default async function ModulePage({
       return renderOfficialDataModule("targets", actor, searchParams);
     }
 
-    const { GoalsAdvancesDashboard } = await import(
-      "@/components/goals-advances-dashboard"
-    );
+    const { GoalsAdvancesDashboard } =
+      await import("@/components/goals-advances-dashboard");
 
     return <GoalsAdvancesDashboard />;
   }
@@ -233,9 +310,8 @@ export default async function ModulePage({
       return renderOfficialDataModule("finances", actor, searchParams);
     }
 
-    const { FinancialHealthDashboard } = await import(
-      "@/components/financial-health-dashboard"
-    );
+    const { FinancialHealthDashboard } =
+      await import("@/components/financial-health-dashboard");
 
     return <FinancialHealthDashboard />;
   }

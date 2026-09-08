@@ -28,7 +28,25 @@ async function MyBranchGate({
   const actor = await requireProtectedPath("/protected/mi-sucursal");
 
   return (
-    <MonthlyClosureRouter actor={actor} filter={{ areaId: params.area, branchId: params.branch, businessLineId: Array.isArray(params.line) ? params.line[0] : params.line, companyId: params.company, countryId: params.country, managerId: params.manager, periodStart: params.from, periodEnd: params.to }} line={params.line} mode="branch-home" />
+    <div data-route-content-ready="my-branch">
+      <MonthlyClosureRouter
+        actor={actor}
+        filter={{
+          areaId: params.area,
+          branchId: params.branch,
+          businessLineId: Array.isArray(params.line)
+            ? params.line[0]
+            : params.line,
+          companyId: params.company,
+          countryId: params.country,
+          managerId: params.manager,
+          periodStart: params.from,
+          periodEnd: params.to,
+        }}
+        line={params.line}
+        mode="branch-home"
+      />
+    </div>
   );
 }
 

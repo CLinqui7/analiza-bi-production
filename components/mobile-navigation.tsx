@@ -1,11 +1,11 @@
 "use client";
 
-import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Home, Menu, X } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { NavigationLink } from "@/components/protected-navigation";
 import {
   getGroupedNavigationForRole,
   type NavigationItem,
@@ -94,18 +94,21 @@ export function MobileNavigation({ roleKey }: MobileNavigationProps) {
 
             <nav className="flex-1 overflow-y-auto px-3 py-4">
               <div className="grid gap-4">
-                {canOpenRoleHome ? <Link
-                  className={cn(
-                    "flex h-11 items-center gap-3 rounded-lg px-3 text-sm text-white/75 transition-colors hover:bg-white/10 hover:text-white",
-                    pathname === "/protected" &&
-                      "bg-[#2878ff] text-white shadow-[0_12px_24px_-18px_rgba(40,120,255,0.9)]",
-                  )}
-                  href="/protected"
-                  onClick={() => setOpen(false)}
-                >
-                  <Home className="size-4 shrink-0" />
-                  Inicio por rol
-                </Link> : null}
+                {canOpenRoleHome ? (
+                  <NavigationLink
+                    className={cn(
+                      "flex h-11 items-center gap-3 rounded-lg px-3 text-sm text-white/75 transition-colors hover:bg-white/10 hover:text-white",
+                      pathname === "/protected" &&
+                        "bg-[#2878ff] text-white shadow-[0_12px_24px_-18px_rgba(40,120,255,0.9)]",
+                    )}
+                    href="/protected"
+                    onClick={() => setOpen(false)}
+                    pendingLabel="Inicio por rol"
+                  >
+                    <Home className="size-4 shrink-0" />
+                    Inicio por rol
+                  </NavigationLink>
+                ) : null}
 
                 {groups.map((group) => (
                   <section className="grid gap-1" key={group.key}>
@@ -117,7 +120,7 @@ export function MobileNavigation({ roleKey }: MobileNavigationProps) {
                       const active = isActive(pathname, item.href);
 
                       return (
-                        <Link
+                        <NavigationLink
                           className={cn(
                             "flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm text-white/75 transition-colors hover:bg-white/10 hover:text-white",
                             active &&
@@ -126,10 +129,11 @@ export function MobileNavigation({ roleKey }: MobileNavigationProps) {
                           href={hrefForItem(item)}
                           key={item.href}
                           onClick={() => setOpen(false)}
+                          pendingLabel={item.title}
                         >
                           <Icon className="size-4 shrink-0" />
                           <span>{item.title}</span>
-                        </Link>
+                        </NavigationLink>
                       );
                     })}
                   </section>

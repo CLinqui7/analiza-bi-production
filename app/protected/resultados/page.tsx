@@ -27,7 +27,27 @@ async function ResultsGate({
   const params = searchParams ? await searchParams : {};
   const actor = await requireProtectedPath("/protected/resultados");
 
-  return <MonthlyClosureRouter actor={actor} filter={{ areaId: params.area, branchId: params.branch, businessLineId: Array.isArray(params.line) ? params.line[0] : params.line, companyId: params.company, countryId: params.country, managerId: params.manager, periodStart: params.from, periodEnd: params.to }} line={params.line} mode="results" />;
+  return (
+    <div data-route-content-ready="results">
+      <MonthlyClosureRouter
+        actor={actor}
+        filter={{
+          areaId: params.area,
+          branchId: params.branch,
+          businessLineId: Array.isArray(params.line)
+            ? params.line[0]
+            : params.line,
+          companyId: params.company,
+          countryId: params.country,
+          managerId: params.manager,
+          periodStart: params.from,
+          periodEnd: params.to,
+        }}
+        line={params.line}
+        mode="results"
+      />
+    </div>
+  );
 }
 
 export default function ResultsPage({ searchParams }: ResultsPageProps) {

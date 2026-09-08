@@ -2,11 +2,10 @@ import { getBranchBiSnapshot } from "@/lib/v7/server/branch-bi-snapshot";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
+import { getDefaultPeriod } from "@/lib/tenant/demo-context";
 
 export type OfficialBusinessLineCode =
-  | "PHYSIOTHERAPY"
-  | "LABORATORY"
-  | "IMAGING";
+  "PHYSIOTHERAPY" | "LABORATORY" | "IMAGING";
 
 export type OfficialDashboardFilter = {
   areaId?: string;
@@ -108,7 +107,8 @@ function lineFilterMatches(
   return (
     record.businessLineId === filter ||
     record.businessLineCode?.toLowerCase() === normalized ||
-    (normalized === "laboratorio" && record.businessLineCode === "LABORATORY") ||
+    (normalized === "laboratorio" &&
+      record.businessLineCode === "LABORATORY") ||
     (normalized === "fisioterapia" &&
       record.businessLineCode === "PHYSIOTHERAPY") ||
     ((normalized === "imagen" || normalized === "imagenes") &&
@@ -117,14 +117,18 @@ function lineFilterMatches(
 }
 
 function sum(values: readonly (number | null)[]) {
-  const present = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  const present = values.filter(
+    (value): value is number => value !== null && Number.isFinite(value),
+  );
   return present.length > 0
     ? present.reduce((total, value) => total + value, 0)
     : null;
 }
 
 function average(values: readonly (number | null)[]) {
-  const present = values.filter((value): value is number => value !== null && Number.isFinite(value));
+  const present = values.filter(
+    (value): value is number => value !== null && Number.isFinite(value),
+  );
   return present.length > 0
     ? present.reduce((total, value) => total + value, 0) / present.length
     : null;
@@ -133,24 +137,37 @@ function average(values: readonly (number | null)[]) {
 type TargetRow = Record<string, unknown>;
 
 function text(row: TargetRow, ...keys: string[]) {
-  const value = keys.map((key) => row[key]).find((candidate) => typeof candidate === "string");
+  const value = keys
+    .map((key) => row[key])
+    .find((candidate) => typeof candidate === "string");
   return typeof value === "string" ? value : null;
 }
 
 function number(row: TargetRow, ...keys: string[]) {
-  const value = keys.map((key) => row[key]).find((candidate) => typeof candidate === "number" || typeof candidate === "string");
+  const value = keys
+    .map((key) => row[key])
+    .find(
+      (candidate) =>
+        typeof candidate === "number" || typeof candidate === "string",
+    );
   const parsed = typeof value === "number" ? value : Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
 function targetMetricKey(kpi: string) {
-  const normalized = kpi.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-  if (/(venta|revenue|facturacion|ingreso)/.test(normalized)) return "revenue" as const;
+  const normalized = kpi
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+  if (/(venta|revenue|facturacion|ingreso)/.test(normalized))
+    return "revenue" as const;
   if (/(margen|margin)/.test(normalized)) return "margin" as const;
-  if (/(ocupacion|occupancy|utilizacion)/.test(normalized)) return "occupancy" as const;
+  if (/(ocupacion|occupancy|utilizacion)/.test(normalized))
+    return "occupancy" as const;
   if (/(sla|tat|turnaround)/.test(normalized)) return "sla" as const;
   if (/(puntaje|score|performance)/.test(normalized)) return "score" as const;
-  if (/(orden|paciente|sesion|estudio|volumen|volume)/.test(normalized)) return "volume" as const;
+  if (/(orden|paciente|sesion|estudio|volumen|volume)/.test(normalized))
+    return "volume" as const;
   return null;
 }
 
@@ -162,20 +179,42 @@ function normalizedMonth(value: string | null | undefined) {
 }
 
 function targetPeriodMatches(row: TargetRow, filter: OfficialDashboardFilter) {
-  const targetMonth = normalizedMonth(text(row, "period_start", "period_month"));
+  const targetMonth = normalizedMonth(
+    text(row, "period_start", "period_month"),
+  );
   if (!targetMonth) return false;
   const fromMonth = normalizedMonth(filter.periodStart);
   const toMonth = normalizedMonth(filter.periodEnd);
-  return (!fromMonth || targetMonth >= fromMonth) && (!toMonth || targetMonth <= toMonth);
+  return (
+    (!fromMonth || targetMonth >= fromMonth) &&
+    (!toMonth || targetMonth <= toMonth)
+  );
 }
 
 function isApprovedTarget(row: TargetRow, filter: OfficialDashboardFilter) {
   const status = text(row, "status")?.toLowerCase();
   const approvedAt = text(row, "approved_at");
-  return row.is_demo !== true
-    && (status === "active" || status === "approved")
-    && Boolean(approvedAt || status === "approved")
-    && targetPeriodMatches(row, filter);
+  return (
+    row.is_demo !== true &&
+    (status === "active" || status === "approved") &&
+    Boolean(approvedAt || status === "approved") &&
+    targetPeriodMatches(row, filter)
+  );
+}
+
+function withDefaultPeriod(
+  filter: OfficialDashboardFilter,
+): OfficialDashboardFilter {
+  if (filter.periodStart || filter.periodEnd) {
+    return filter;
+  }
+
+  const period = getDefaultPeriod();
+  return {
+    ...filter,
+    periodEnd: `${period}-31`,
+    periodStart: `${period}-01`,
+  };
 }
 
 /**
@@ -187,15 +226,28 @@ export async function getOfficialExecutiveSnapshot(
   actor: AuthorizationActor,
   filter: OfficialDashboardFilter = {},
 ): Promise<OfficialExecutiveSnapshot> {
-  const branchSnapshot = await getBranchBiSnapshot(actor, filter, { mode: "summary" });
+  // The protected header displays this same default period before a user
+  // applies filters. Keeping it in the server filter prevents an unfiltered
+  // snapshot (for example August) from being labeled as the header month
+  // (for example July).
+  const effectiveFilter = withDefaultPeriod(filter);
+  const branchSnapshot = await getBranchBiSnapshot(actor, effectiveFilter, {
+    mode: "summary",
+  });
   const scopedRecords = branchSnapshot.records.filter(
     (record) =>
-      (isWildcard(filter.countryId) || record.countryId === filter.countryId) &&
-      (isWildcard(filter.companyId) || record.companyId === filter.companyId) &&
-      (isWildcard(filter.areaId) || record.operationalAreaId === filter.areaId) &&
-      (isWildcard(filter.branchId) || record.branchId === filter.branchId) &&
-      (isWildcard(filter.managerId) || record.branchManagerId === filter.managerId || record.areaManagerId === filter.managerId) &&
-      lineFilterMatches(record, filter.businessLineId),
+      (isWildcard(effectiveFilter.countryId) ||
+        record.countryId === effectiveFilter.countryId) &&
+      (isWildcard(effectiveFilter.companyId) ||
+        record.companyId === effectiveFilter.companyId) &&
+      (isWildcard(effectiveFilter.areaId) ||
+        record.operationalAreaId === effectiveFilter.areaId) &&
+      (isWildcard(effectiveFilter.branchId) ||
+        record.branchId === effectiveFilter.branchId) &&
+      (isWildcard(effectiveFilter.managerId) ||
+        record.branchManagerId === effectiveFilter.managerId ||
+        record.areaManagerId === effectiveFilter.managerId) &&
+      lineFilterMatches(record, effectiveFilter.businessLineId),
   );
   const publishedRecords = scopedRecords.filter(
     (record) => record.hasPublishedClosing,
@@ -207,42 +259,81 @@ export async function getOfficialExecutiveSnapshot(
       .sort()
       .at(-1) ?? null;
   const admin = getSupabaseAdminClient();
-  const targetResult = admin && scopedRecords.length > 0
-    ? await admin.from("kpi_targets").select("*").eq("organization_id", actor.scope.organizationId).in("branch_id", Array.from(new Set(scopedRecords.map((record) => record.branchId))))
-    : { data: [] as TargetRow[] };
-  const targets = ((targetResult.data ?? []) as TargetRow[]).filter((target) => isApprovedTarget(target, filter));
-  const targetComparisons = targets.flatMap<OfficialTargetComparison>((target) => {
-    const branchId = text(target, "branch_id");
-    const lineId = text(target, "business_line_id");
-    const lineCode = text(target, "business_line");
-    const record = scopedRecords.find((candidate) => candidate.branchId === branchId && (!lineId || candidate.businessLineId === lineId) && (!lineCode || candidate.businessLineCode === lineCode));
-    const kpiId = text(target, "kpi_code", "kpi_id") ?? "unknown";
-    const targetValue = number(target, "target_value");
-    const key = targetMetricKey(kpiId);
-    const officialLine = asOfficialLine(record?.businessLineCode ?? null);
-    if (!record || !officialLine || targetValue === null) return [];
-    const actualValue = key ? record.metrics[key]?.value ?? null : null;
-    const direction = text(target, "direction") ?? "HIGHER_IS_BETTER";
-    const compliance = actualValue === null || !Number.isFinite(actualValue) || targetValue <= 0
-      ? null
-      : direction === "LOWER_IS_BETTER"
-        ? actualValue > 0 ? targetValue / actualValue : null
-        : actualValue / targetValue;
-    return [{
-      actualValue,
-      branchName: record.branchName,
-      businessLine: officialLine,
-      compliance,
-      kpiId,
-      kpiLabel: text(target, "kpi_name", "label") ?? kpiId,
-      lineName: lineNames[officialLine],
-      period: normalizedMonth(text(target, "period_start", "period_month")) ?? normalizedMonth(record.latestPeriod) ?? "Sin periodo",
-      status: compliance === null ? "sin_resultado" : compliance >= 1 ? "cumplido" : compliance >= 0.9 ? "vigilar" : "critico",
-      targetValue,
-      unit: text(target, "unit") === "ratio" ? "ratio" : text(target, "unit") === "count" ? "count" : "currency",
-      variance: actualValue === null ? null : actualValue - targetValue,
-    }];
-  });
+  const targetResult =
+    admin && scopedRecords.length > 0
+      ? await admin
+          .from("kpi_targets")
+          .select("*")
+          .eq("organization_id", actor.scope.organizationId)
+          .in(
+            "branch_id",
+            Array.from(new Set(scopedRecords.map((record) => record.branchId))),
+          )
+      : { data: [] as TargetRow[] };
+  const targets = ((targetResult.data ?? []) as TargetRow[]).filter((target) =>
+    isApprovedTarget(target, effectiveFilter),
+  );
+  const targetComparisons = targets.flatMap<OfficialTargetComparison>(
+    (target) => {
+      const branchId = text(target, "branch_id");
+      const lineId = text(target, "business_line_id");
+      const lineCode = text(target, "business_line");
+      const record = scopedRecords.find(
+        (candidate) =>
+          candidate.branchId === branchId &&
+          (!lineId || candidate.businessLineId === lineId) &&
+          (!lineCode || candidate.businessLineCode === lineCode),
+      );
+      const kpiId = text(target, "kpi_code", "kpi_id") ?? "unknown";
+      const targetValue = number(target, "target_value");
+      const key = targetMetricKey(kpiId);
+      const officialLine = asOfficialLine(record?.businessLineCode ?? null);
+      if (!record || !officialLine || targetValue === null) return [];
+      const actualValue = key ? (record.metrics[key]?.value ?? null) : null;
+      const direction = text(target, "direction") ?? "HIGHER_IS_BETTER";
+      const compliance =
+        actualValue === null ||
+        !Number.isFinite(actualValue) ||
+        targetValue <= 0
+          ? null
+          : direction === "LOWER_IS_BETTER"
+            ? actualValue > 0
+              ? targetValue / actualValue
+              : null
+            : actualValue / targetValue;
+      return [
+        {
+          actualValue,
+          branchName: record.branchName,
+          businessLine: officialLine,
+          compliance,
+          kpiId,
+          kpiLabel: text(target, "kpi_name", "label") ?? kpiId,
+          lineName: lineNames[officialLine],
+          period:
+            normalizedMonth(text(target, "period_start", "period_month")) ??
+            normalizedMonth(record.latestPeriod) ??
+            "Sin periodo",
+          status:
+            compliance === null
+              ? "sin_resultado"
+              : compliance >= 1
+                ? "cumplido"
+                : compliance >= 0.9
+                  ? "vigilar"
+                  : "critico",
+          targetValue,
+          unit:
+            text(target, "unit") === "ratio"
+              ? "ratio"
+              : text(target, "unit") === "count"
+                ? "count"
+                : "currency",
+          variance: actualValue === null ? null : actualValue - targetValue,
+        },
+      ];
+    },
+  );
   const lineSummaries = (
     Object.keys(lineNames) as OfficialBusinessLineCode[]
   ).flatMap((businessLine) => {
@@ -267,42 +358,78 @@ export async function getOfficialExecutiveSnapshot(
         publishedClosings: records.length,
         qualityScore: average(records.map((record) => record.dataQuality)),
         revenueActual,
-        revenueCompliance: (() => { const values = targetComparisons.filter((target) => target.businessLine === businessLine && targetMetricKey(target.kpiId) === "revenue").map((target) => target.compliance); return average(values); })(),
-        revenueTarget: sum(targetComparisons.filter((target) => target.businessLine === businessLine && targetMetricKey(target.kpiId) === "revenue").map((target) => target.targetValue)),
-        status: (() => { const compliance = average(targetComparisons.filter((target) => target.businessLine === businessLine && targetMetricKey(target.kpiId) === "revenue").map((target) => target.compliance)); if (compliance === null) return "sin_meta" as const; return compliance >= 1 ? "cumplido" as const : compliance >= .9 ? "vigilar" as const : "critico" as const; })(),
+        revenueCompliance: (() => {
+          const values = targetComparisons
+            .filter(
+              (target) =>
+                target.businessLine === businessLine &&
+                targetMetricKey(target.kpiId) === "revenue",
+            )
+            .map((target) => target.compliance);
+          return average(values);
+        })(),
+        revenueTarget: sum(
+          targetComparisons
+            .filter(
+              (target) =>
+                target.businessLine === businessLine &&
+                targetMetricKey(target.kpiId) === "revenue",
+            )
+            .map((target) => target.targetValue),
+        ),
+        status: (() => {
+          const compliance = average(
+            targetComparisons
+              .filter(
+                (target) =>
+                  target.businessLine === businessLine &&
+                  targetMetricKey(target.kpiId) === "revenue",
+              )
+              .map((target) => target.compliance),
+          );
+          if (compliance === null) return "sin_meta" as const;
+          return compliance >= 1
+            ? ("cumplido" as const)
+            : compliance >= 0.9
+              ? ("vigilar" as const)
+              : ("critico" as const);
+        })(),
       },
     ];
   });
   const recordsByBranchId = new Map(
     scopedRecords.map((record) => [record.branchId, record]),
   );
-  const insights = branchSnapshot.insights.flatMap<OfficialInsight>((insight) => {
-    const record = insight.branchId
-      ? recordsByBranchId.get(insight.branchId)
-      : null;
-    const businessLine = asOfficialLine(record?.businessLineCode ?? null);
-    if (!record || !businessLine) return [];
+  const insights = branchSnapshot.insights.flatMap<OfficialInsight>(
+    (insight) => {
+      const record = insight.branchId
+        ? recordsByBranchId.get(insight.branchId)
+        : null;
+      const businessLine = asOfficialLine(record?.businessLineCode ?? null);
+      if (!record || !businessLine) return [];
 
-    return [
-      {
-        branchName: record.branchName,
-        businessLine,
-        impact: "Sin dato",
-        kpiId: "sin-kpi-especifico",
-        lineName: lineNames[businessLine],
-        message: insight.message,
-        period: record.latestPeriod?.slice(0, 7) ?? "Sin periodo",
-        recommendedAction: insight.recommendedAction ?? "Sin acción recomendada",
-        severity:
-          insight.severity === "critica" ||
-          insight.severity === "alta" ||
-          insight.severity === "positiva"
-            ? insight.severity
-            : "media",
-        title: insight.title,
-      },
-    ];
-  });
+      return [
+        {
+          branchName: record.branchName,
+          businessLine,
+          impact: "Sin dato",
+          kpiId: "sin-kpi-especifico",
+          lineName: lineNames[businessLine],
+          message: insight.message,
+          period: record.latestPeriod?.slice(0, 7) ?? "Sin periodo",
+          recommendedAction:
+            insight.recommendedAction ?? "Sin acción recomendada",
+          severity:
+            insight.severity === "critica" ||
+            insight.severity === "alta" ||
+            insight.severity === "positiva"
+              ? insight.severity
+              : "media",
+          title: insight.title,
+        },
+      ];
+    },
+  );
   const countries = new Set(
     publishedRecords.map((record) => record.countryId).filter(Boolean),
   );
@@ -324,8 +451,16 @@ export async function getOfficialExecutiveSnapshot(
       officialInsights: insights.length,
       publishedClosings: publishedRecords.length,
       revenueActual,
-      revenueCompliance: average(targetComparisons.filter((target) => targetMetricKey(target.kpiId) === "revenue").map((target) => target.compliance)),
-      revenueTarget: sum(targetComparisons.filter((target) => targetMetricKey(target.kpiId) === "revenue").map((target) => target.targetValue)),
+      revenueCompliance: average(
+        targetComparisons
+          .filter((target) => targetMetricKey(target.kpiId) === "revenue")
+          .map((target) => target.compliance),
+      ),
+      revenueTarget: sum(
+        targetComparisons
+          .filter((target) => targetMetricKey(target.kpiId) === "revenue")
+          .map((target) => target.targetValue),
+      ),
     },
   };
 }

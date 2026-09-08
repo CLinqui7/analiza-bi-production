@@ -55,3 +55,13 @@ No se creó un índice ni una migración: la evidencia mostró trabajo de aplica
 ## Rollback
 
 El rollback consiste en reasignar el alias al deployment anterior verificado o revertir el commit de rendimiento. No requiere cambios de esquema, migraciones, variables de entorno, RLS ni proveedores.
+
+## Navegación protegida: línea base y criterio de aceptación
+
+La línea base se tomó en el alias productivo con una cuenta efímera de gerente de sucursal, grants A/Laboratorio y B/Fisioterapia y sin crear ni publicar cierres. La secuencia fue Resultados → Metas → Resultados → Metas → Mi sucursal → Historial → Formulario. Antes de este cambio, la primera interacción provocó múltiples precargas RSC de enlaces laterales no seleccionados; en la misma corrida, los dos accesos a Metas completaron en 1421 ms y 1158 ms, y el cambio de URL tardó 1057 ms y 796 ms respectivamente.
+
+La navegación lateral ahora desactiva la precarga por visibilidad y precarga solamente la URL exacta —incluidos los filtros— al hover/focus y hasta dos destinos probables después de 1.2 s de inactividad. Se deduplica por sesión y no se precarga con ahorro de datos o red 2G. No se usa caché pública de contenido privado: la autorización y las consultas siguen en servidor por solicitud.
+
+Cada enlace mantiene semántica nativa, modificadores de teclado y clic secundario. Un estado pendiente inmediato, con el destino visible y `aria-busy`, se cierra al cambiar de ruta o por tiempo de seguridad. `loading.tsx` y límites de Suspense entregan un esqueleto autorizado antes de los snapshots BI costosos. El snapshot oficial usa el mismo período predeterminado que muestra la cabecera; así, una cabecera de julio no puede presentar una comparación de metas de agosto al faltar parámetros de período.
+
+La verificación posterior debe registrar por transición: respuesta RSC de la ruta elegida, tiempo de feedback pendiente, cambio de URL y aparición de `data-route-content-ready`; no se interpreta el estado 200 por sí solo como contenido correcto. `scripts/navigation-production-qa.mjs` crea y elimina su usuario y asignaciones en `finally`.

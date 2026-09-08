@@ -27,7 +27,27 @@ async function ClosuresGate({
   const params = searchParams ? await searchParams : {};
   const actor = await requireProtectedPath("/protected/cierres");
 
-  return <MonthlyClosureRouter actor={actor} filter={{ areaId: params.area, branchId: params.branch, businessLineId: Array.isArray(params.line) ? params.line[0] : params.line, companyId: params.company, countryId: params.country, managerId: params.manager, periodStart: params.from, periodEnd: params.to }} line={params.line} mode="history" />;
+  return (
+    <div data-route-content-ready="closures">
+      <MonthlyClosureRouter
+        actor={actor}
+        filter={{
+          areaId: params.area,
+          branchId: params.branch,
+          businessLineId: Array.isArray(params.line)
+            ? params.line[0]
+            : params.line,
+          companyId: params.company,
+          countryId: params.country,
+          managerId: params.manager,
+          periodStart: params.from,
+          periodEnd: params.to,
+        }}
+        line={params.line}
+        mode="history"
+      />
+    </div>
+  );
 }
 
 export default function ClosuresPage({ searchParams }: ClosuresPageProps) {

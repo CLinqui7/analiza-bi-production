@@ -1,12 +1,12 @@
 "use client";
 
 import Image from "next/image";
-import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { Home, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect, useState } from "react";
 
 import { Button } from "@/components/ui/button";
+import { NavigationLink } from "@/components/protected-navigation";
 import { cn } from "@/lib/utils";
 import {
   getGroupedNavigationForRole,
@@ -23,6 +23,7 @@ import {
 const storageKey = "analiza:sidebar-collapsed";
 const roleStorageKey = "analiza:demo-role";
 const roleChangeEvent = "analiza:role-change";
+const visibleModulesLabel = "modulos visibles";
 const businessLineByHref: Record<string, string> = {
   "/protected/fisioterapia": "business-line-fisioterapia",
   "/protected/imagenes": "business-line-imagenes",
@@ -126,21 +127,22 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
 
       <nav className="flex-1 overflow-y-auto px-3 py-4">
         <div className="grid gap-4">
-          {canOpenRoleHome ? <Link
-            className={cn(
-              "flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-white/70 transition-colors hover:bg-white/10 hover:text-white",
-              pathname === "/protected" &&
-                "bg-[#2878ff] text-white shadow-[0_12px_24px_-18px_rgba(40,120,255,0.9)] hover:bg-[#2878ff] hover:text-white",
-              collapsed && "justify-center px-0",
-            )}
-            href="/protected"
-            title="Inicio por rol"
-          >
-            <Home className="size-4 shrink-0" />
-            <span className={cn(collapsed && "sr-only")}>
-              Inicio por rol
-            </span>
-          </Link> : null}
+          {canOpenRoleHome ? (
+            <NavigationLink
+              className={cn(
+                "flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-white/70 transition-colors hover:bg-white/10 hover:text-white",
+                pathname === "/protected" &&
+                  "bg-[#2878ff] text-white shadow-[0_12px_24px_-18px_rgba(40,120,255,0.9)] hover:bg-[#2878ff] hover:text-white",
+                collapsed && "justify-center px-0",
+              )}
+              href="/protected"
+              pendingLabel="Inicio por rol"
+              title="Inicio por rol"
+            >
+              <Home className="size-4 shrink-0" />
+              <span className={cn(collapsed && "sr-only")}>Inicio por rol</span>
+            </NavigationLink>
+          ) : null}
 
           {visibleGroups.map((group) => (
             <section className="grid gap-1" key={group.key}>
@@ -157,7 +159,7 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
                 const active = isActive(pathname, item);
 
                 return (
-                  <Link
+                  <NavigationLink
                     className={cn(
                       "flex h-10 items-center gap-3 rounded-lg px-3 text-sm text-white/70 transition-colors hover:bg-white/10 hover:text-white",
                       active &&
@@ -166,13 +168,14 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
                     )}
                     href={hrefForItem(item)}
                     key={item.href}
+                    pendingLabel={item.title}
                     title={`${group.title}: ${item.title}`}
                   >
                     <Icon className="size-4 shrink-0" />
                     <span className={cn(collapsed && "sr-only")}>
                       {item.title}
                     </span>
-                  </Link>
+                  </NavigationLink>
                 );
               })}
             </section>
@@ -184,12 +187,14 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
         <div className={cn("grid gap-2", collapsed && "sr-only")}>
           {!allowDemoRoleSwitch ? (
             <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-xs leading-5 text-white/60">
-              <div className="font-medium text-white">
-                {roleProfile.label}
-              </div>
+              <div className="font-medium text-white">{roleProfile.label}</div>
               <div>{roleProfile.accessSummary}</div>
-              <div className="mt-1 text-white/50">
-                {visibleItems.length} de {navigationItems.length} modulos visibles
+              <div
+                aria-label={visibleModulesLabel}
+                className="mt-1 text-white/50"
+              >
+                {visibleItems.length} de {navigationItems.length} modulos
+                visibles
               </div>
             </div>
           ) : (
@@ -199,7 +204,9 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
                 <select
                   className="h-9 rounded-lg border border-white/10 bg-white px-2 text-xs text-slate-950 outline-none"
                   value={activeRole}
-                  onChange={(event) => changeRole(event.target.value as RoleKey)}
+                  onChange={(event) =>
+                    changeRole(event.target.value as RoleKey)
+                  }
                 >
                   {roleKeys.map((role) => (
                     <option key={role} value={role}>
@@ -209,10 +216,16 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
                 </select>
               </label>
               <div className="rounded-lg border border-white/10 bg-white/[0.06] px-3 py-2 text-xs leading-5 text-white/60">
-                <div className="font-medium text-white">{roleProfile.label}</div>
+                <div className="font-medium text-white">
+                  {roleProfile.label}
+                </div>
                 <div>{roleProfile.accessSummary}</div>
-                <div className="mt-1 text-white/50">
-                  {visibleItems.length} de {navigationItems.length} modulos visibles
+                <div
+                  aria-label={visibleModulesLabel}
+                  className="mt-1 text-white/50"
+                >
+                  {visibleItems.length} de {navigationItems.length} modulos
+                  visibles
                 </div>
               </div>
             </>
@@ -247,9 +260,7 @@ export function AppSidebar({ allowDemoRoleSwitch, roleKey }: AppSidebarProps) {
                 width={360}
               />
               <div>
-                <div className="font-medium text-white/65">
-                  InteractiveCore
-                </div>
+                <div className="font-medium text-white/65">InteractiveCore</div>
                 <div>Todos los derechos reservados</div>
               </div>
             </div>
