@@ -65,3 +65,29 @@ La navegación lateral ahora desactiva la precarga por visibilidad y precarga so
 Cada enlace mantiene semántica nativa, modificadores de teclado y clic secundario. Un estado pendiente inmediato, con el destino visible y `aria-busy`, se cierra al cambiar de ruta o por tiempo de seguridad. `loading.tsx` y límites de Suspense entregan un esqueleto autorizado antes de los snapshots BI costosos. El snapshot oficial usa el mismo período predeterminado que muestra la cabecera; así, una cabecera de julio no puede presentar una comparación de metas de agosto al faltar parámetros de período.
 
 La verificación posterior debe registrar por transición: respuesta RSC de la ruta elegida, tiempo de feedback pendiente, cambio de URL y aparición de `data-route-content-ready`; no se interpreta el estado 200 por sí solo como contenido correcto. `scripts/navigation-production-qa.mjs` crea y elimina su usuario y asignaciones en `finally`.
+
+## Navegación: candidato activo `9bd36d2` (2026-09-08)
+
+El deployment activo es `dpl_H2B8XceMAhVEXuTaM6QYwWHSUuQz`, en IAD1, con los alias `https://web-clinqui7s-projects.vercel.app` y `https://web-eta-peach-44.vercel.app`. Se publicó desde un archivo limpio de ese SHA; no incluyó cambios locales ajenos.
+
+La barra protegida conserva enlaces nativos. Una intención por hover/foco o las dos rutas probables tras 1.2 s habilita `prefetch={true}` en ese enlace exacto. Esta es la API pública de Next 16.2.10 para traer la ruta completa dinámica; no se usa una caché HTTP pública ni se comparte contenido entre sesiones. La intención se limita a 12 URLs por sesión, respeta ahorro de datos/2G y conserva los filtros URL vigentes.
+
+La medición se hizo contra el alias con un gerente de sucursal QA efímero, grants A/Laboratorio y B/Fisioterapia, y sin registrar cuerpos, IDs, cookies ni datos de negocio. `contentReadyMs` espera el marcador de contenido final; no cuenta el shell, el cambio de URL ni el skeleton como éxito.
+
+| Ruta | Escenario | Clic → feedback | Clic → contenido correcto | RSC iniciado tras clic |
+| --- | --- | ---: | ---: | --- |
+| Resultados | primera no preparada | 54 ms | 1644 ms | 3 respuestas; headers 141, 160 y 256 ms |
+| Metas | preparada tras estabilizar la ruta anterior | 48 ms | 67 ms | ninguna |
+| Resultados | revisita | 45 ms | 64 ms | ninguna |
+| Metas | revisita | 44 ms | 60 ms | ninguna |
+| Mi sucursal | preparada | 35 ms | 54 ms | ninguna |
+| Historial | primera no preparada | 43 ms | 1111 ms | 3 respuestas; headers 126, 143 y 241 ms |
+| Formulario | primera no preparada | 40 ms | 1135 ms | 3 respuestas; headers 146, 219 y 263 ms |
+
+La comprobación adicional de intención por hover (tres clics) obtuvo 54 ms de mediana, 52–61 ms de rango, desde el clic hasta contenido. El tiempo de preparación se reporta aparte (1841–1853 ms) y no se suma ni se oculta dentro de la métrica de clic. Esas transiciones no iniciaron RSC después del clic.
+
+Por tanto, el objetivo de 300 ms se cumple en esta muestra para las rutas preparadas y revisitas (54–67 ms, seis transiciones); el feedback cumple en las siete rutas observadas (35–54 ms). No se cumple todavía para primeras entradas no preparadas: 1111–1644 ms. Sus headers RSC llegan en 126–263 ms, por lo que el tramo dominante es posterior al primer byte: composición dinámica privada/streaming y activación del contenido. Las corrientes RSC de esas rutas pueden permanecer abiertas tras aparecer el contenido, así que su finalización no se usa como indicador de pantalla útil.
+
+La diferencia frente a la corrida rápida previa de revisitas (mediana 1411 ms) se interpreta sólo para el escenario preparado/revisitado equivalente; no se extrapola a primeras cargas ni a otras redes. La próxima optimización, si se autoriza una nueva fase, debe instrumentar por separado las consultas y la hidratación de esas tres primeras entradas antes de cambiar índices, regiones o políticas de caché.
+
+La matriz funcional autenticada de producción terminó con `authenticatedRoles: PASS` y `qaCleanup: PASS`. Además, `runtime-service-role-qa` confirmó A y B permitidas, C denegada, escritura directa a C denegada con `404`, filtros correctos y runtime de service role correcto. La prueba de Metas ahora espera su marcador de contenido final después del streaming; valida el período explícito, meta aprobada, resultado publicado y cálculo de cumplimiento, no el skeleton inicial.

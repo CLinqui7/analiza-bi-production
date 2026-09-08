@@ -218,7 +218,7 @@ try {
     const selector = hrefSelector(pathname);
     const link = page.locator(selector).first();
     await link.waitFor({ state: "visible", timeout: navigationTimeoutMs });
-    const startedAt = performance.now();
+    const prefetchStartedAt = performance.now();
     const prefetchedResponses = [];
     const prefetchResponseListener = (response) => {
       const request = response.request();
@@ -230,7 +230,7 @@ try {
           response.headers()["content-type"]?.includes("text/x-component"))
       ) {
         prefetchedResponses.push({
-          headersMs: Math.round(performance.now() - startedAt),
+          headersMs: Math.round(performance.now() - prefetchStartedAt),
           routerPrefetch: request.headers()["next-router-prefetch"] === "1",
           status: response.status(),
         });
@@ -246,6 +246,7 @@ try {
       }
     }
 
+    const startedAt = performance.now();
     const responses = [];
     const responseFinishers = [];
     const responseListener = (response) => {
@@ -310,6 +311,7 @@ try {
         contentReadyMs,
         pendingFeedbackMs: await pendingFeedback,
         pathname,
+        prefetchLeadMs: Math.round(startedAt - prefetchStartedAt),
         prefetchRscResponses: prefetchedResponses,
         rscResponses: responses,
         urlChangedMs,

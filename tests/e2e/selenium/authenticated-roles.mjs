@@ -1096,6 +1096,10 @@ try {
   await driver.get(`${baseUrl}/protected/cierres`);
   await waitForDashboard("Historial de cierres");
   await driver.get(`${baseUrl}/protected/metas?branch=${branchA.id}&line=${line.data.id}&from=2026-08-01&to=2026-08-31`);
+  await driver.wait(
+    until.elementLocated(By.css('[data-route-content-ready="official-targets"]')),
+    20_000,
+  );
   const targetsText = await bodyText();
   assert.doesNotMatch(targetsText, /configuration_error|backend anterior/i);
   assert.match(targetsText, /Metas aprobadas vs resultados/, "Metas must load the approved QA target.");
