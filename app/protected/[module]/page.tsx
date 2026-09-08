@@ -64,7 +64,7 @@ export function generateStaticParams() {
 }
 
 async function renderOfficialDataModule(
-  mode: "finances" | "insights" | "targets",
+  mode: "finances" | "insights" | "overview" | "targets",
   actor: Awaited<ReturnType<typeof requireProtectedPath>>,
   searchParams: ModulePageProps["searchParams"],
 ) {
@@ -222,7 +222,7 @@ export default async function ModulePage({
 
   if (module === "operacion") {
     if (!isDemoRuntimeEnvironment()) {
-      return renderOfficialDataModule("insights", actor, searchParams);
+      return renderOfficialDataModule("overview", actor, searchParams);
     }
 
     return <ExecutiveOperationDashboard />;
