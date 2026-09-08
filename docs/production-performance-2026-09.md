@@ -26,6 +26,24 @@ Una segunda corrida de control, sin cambios desplegados, dio 848 ms de mediana p
 - Filtros de país, empresa, área, sucursal y línea se aplican en las consultas antes de la comprobación final `actorCanSee`.
 - Versiones de cierre se agrupan una vez por sucursal y línea; las tendencias y la versión oficial usan el mismo índice ordenado.
 - `/api/context/options` expone `Server-Timing: app` sin identificadores, SQL, cuerpos ni secretos para separar servidor de red en la medición posterior.
+- La ruta de operación ejecutiva renderiza el resumen oficial (`overview`) y no reutiliza el módulo de Insights.
+
+## Medición posterior remota
+
+El candidato final `340daca` se verificó ya detrás del alias productivo con el mismo QA efímero, región y cinco solicitudes no-cacheadas. La sesión de prueba comprobó A/Laboratorio y B/Fisioterapia, mantuvo C fuera de listas y obtuvo `404` al intentar una escritura directa en C bajo RLS.
+
+| Operación | Antes (mediana) | Después (mediana) | Rango posterior | Muestras |
+| --- | ---: | ---: | ---: | ---: |
+| `/api/context/options` | 1003 ms | 620 ms | 521–801 ms | 5 / 5 |
+| `/api/auth/session` | 565 ms | 450 ms | 415–476 ms | 5 / 5 |
+
+La mejora de contexto frente a la primera línea base es 383 ms (38 %). Frente a la corrida de control previa (848 ms) es 228 ms (27 %); esta segunda comparación es más conservadora y se reporta porque las muestras son pequeñas. `Server-Timing: app` posterior quedó entre 413.3 y 666.7 ms. El tiempo de login no se usa como comparación: la primera y última corrida no comparten una latencia de red estable.
+
+## Trabajo eliminado y límites
+
+En una vista de resumen se eliminan tres lecturas de historial: submissions manuales, perfiles de autores y adjuntos. En una vista de historial se eliminan tres lecturas de resumen: cierres publicados, resultados KPI e insights. Además, la agrupación de versiones evita repetir `filter` y `sort` por cada combinación sucursal/línea.
+
+No se creó un índice ni una migración: la evidencia mostró trabajo de aplicación y viajes/filas evitables, no un plan SQL lento medido que justificara un cambio de escritura en producción. Aún no hay una medición de carga para dashboards muy grandes ni de carga de archivos; no se presentan como optimizados.
 
 ## Cómo repetir
 
