@@ -214,10 +214,37 @@ try {
   await page.waitForURL("**/protected/**", { timeout: navigationTimeoutMs });
   await page.waitForLoadState("networkidle", { timeout: navigationTimeoutMs });
 
-  async function navigateBySidebar(pathname) {
+  async function navigateBySidebar(pathname, prefetchLeadMs = 0) {
     const selector = hrefSelector(pathname);
     const link = page.locator(selector).first();
     await link.waitFor({ state: "visible", timeout: navigationTimeoutMs });
+    const startedAt = performance.now();
+    const prefetchedResponses = [];
+    const prefetchResponseListener = (response) => {
+      const request = response.request();
+      const responseUrl = response.url();
+      if (
+        request.resourceType() === "fetch" &&
+        new URL(responseUrl).pathname === pathname &&
+        (responseUrl.includes("_rsc=") ||
+          response.headers()["content-type"]?.includes("text/x-component"))
+      ) {
+        prefetchedResponses.push({
+          headersMs: Math.round(performance.now() - startedAt),
+          routerPrefetch: request.headers()["next-router-prefetch"] === "1",
+          status: response.status(),
+        });
+      }
+    };
+    if (prefetchLeadMs > 0) {
+      page.on("response", prefetchResponseListener);
+      try {
+        await link.hover();
+        await page.waitForTimeout(prefetchLeadMs);
+      } finally {
+        page.off("response", prefetchResponseListener);
+      }
+    }
 
     const responses = [];
     const responseFinishers = [];
@@ -242,7 +269,6 @@ try {
         );
       }
     };
-    const startedAt = performance.now();
     const supportsPendingFeedback =
       (await link.getAttribute("data-navigation-link")) === "true";
     const pendingFeedback = supportsPendingFeedback
@@ -284,6 +310,7 @@ try {
         contentReadyMs,
         pendingFeedbackMs: await pendingFeedback,
         pathname,
+        prefetchRscResponses: prefetchedResponses,
         rscResponses: responses,
         urlChangedMs,
       };
@@ -306,6 +333,15 @@ try {
     transitions.push(await navigateBySidebar(pathname));
   }
 
+  const prefetchedTransitions = [];
+  for (const pathname of [
+    "/protected/resultados",
+    "/protected/metas",
+    "/protected/resultados",
+  ]) {
+    prefetchedTransitions.push(await navigateBySidebar(pathname, 1_800));
+  }
+
   assert.deepEqual(runtimeFailures, [], "RUNTIME_5XX");
   assert.equal(
     transitions.length,
@@ -319,10 +355,15 @@ try {
       ),
     )
     .map((transition) => transition.contentReadyMs);
+  const prefetchedMedianMs = median(
+    prefetchedTransitions.map((transition) => transition.contentReadyMs),
+  );
 
   console.log(
     JSON.stringify({
       baseUrl,
+      prefetchedMedianMs,
+      prefetchedTransitions,
       revisitMedianMs: median(revisitMeasurements),
       transitions,
     }),

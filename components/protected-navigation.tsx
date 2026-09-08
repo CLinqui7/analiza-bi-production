@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useLinkStatus } from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { LoaderCircle } from "lucide-react";
 import {
   createContext,
@@ -27,6 +27,7 @@ type NavigationIntent = {
 
 type ProtectedNavigationContextValue = {
   beginNavigation: (href: string) => void;
+  isPrefetchEnabled: (href: string) => boolean;
   pendingHref: string | null;
   prefetch: (href: string) => void;
 };
@@ -143,29 +144,36 @@ export function ProtectedNavigationProvider({
   roleKey,
 }: ProtectedNavigationProviderProps) {
   const pathname = usePathname();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [intent, setIntent] = useState<NavigationIntent | null>(null);
+  const [prefetchPaths, setPrefetchPaths] = useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
   const prefetchedPaths = useRef(new Set<string>());
   const current = useMemo(
     () => currentPath(pathname, searchParams),
     [pathname, searchParams],
   );
 
-  const prefetch = useCallback(
-    (href: string) => {
-      if (
-        !canPrefetch() ||
-        prefetchedPaths.current.has(href) ||
-        prefetchedPaths.current.size >= maximumPrefetchedPaths
-      ) {
-        return;
-      }
+  const prefetch = useCallback((href: string) => {
+    if (
+      !canPrefetch() ||
+      prefetchedPaths.current.has(href) ||
+      prefetchedPaths.current.size >= maximumPrefetchedPaths
+    ) {
+      return;
+    }
 
-      prefetchedPaths.current.add(href);
-      router.prefetch(href);
-    },
-    [router],
+    prefetchedPaths.current.add(href);
+    // `prefetch={true}` is the public Next API for a full dynamic-route
+    // prefetch. It is opt-in only after real user intent or our small,
+    // settled-route prediction set.
+    setPrefetchPaths((paths) => new Set(paths).add(href));
+  }, []);
+
+  const isPrefetchEnabled = useCallback(
+    (href: string) => prefetchPaths.has(href),
+    [prefetchPaths],
   );
 
   const beginNavigation = useCallback(
@@ -214,10 +222,11 @@ export function ProtectedNavigationProvider({
   const value = useMemo<ProtectedNavigationContextValue>(
     () => ({
       beginNavigation,
+      isPrefetchEnabled,
       pendingHref: intent?.href ?? null,
       prefetch,
     }),
-    [beginNavigation, intent?.href, prefetch],
+    [beginNavigation, intent?.href, isPrefetchEnabled, prefetch],
   );
 
   return (
@@ -241,6 +250,7 @@ export function NavigationLink({
   const isIntentPending = navigation?.pendingHref
     ? isSamePath(navigation.pendingHref, href)
     : false;
+  const shouldPrefetch = navigation?.isPrefetchEnabled(href) ?? false;
 
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
     onClick?.(event);
@@ -274,7 +284,7 @@ export function NavigationLink({
       onClick={handleClick}
       onFocus={handleFocus}
       onMouseEnter={handleMouseEnter}
-      prefetch={false}
+      prefetch={shouldPrefetch}
       target={target}
     >
       {children}
