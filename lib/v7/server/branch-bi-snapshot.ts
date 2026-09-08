@@ -9,6 +9,7 @@ import {
   actorCanSee,
   getTenantContextOptions,
 } from "@/lib/v7/server/tenant-context";
+import type { Actor } from "@/lib/v7/security/types";
 
 export type BranchBiMetricKey =
   "revenue" | "margin" | "volume" | "occupancy" | "sla" | "score";
@@ -168,6 +169,16 @@ function hasScopedFilter(value: string | undefined) {
   return Boolean(value && !value.startsWith("__"));
 }
 
+function concreteBranchGrantIds(actor: Actor) {
+  const grants = actor.scopeGrants?.length ? actor.scopeGrants : [actor.scope];
+
+  if (grants.length === 0 || grants.some((grant) => !grant.branchId)) {
+    return null;
+  }
+
+  return Array.from(new Set(grants.flatMap((grant) => grant.branchId ?? [])));
+}
+
 function periodFor(version: ClosingVersionRow) {
   return (
     version.period_end ?? version.period_start ?? version.published_at ?? ""
@@ -241,10 +252,15 @@ async function getBranchBiSnapshotUncached(
   }
 
   const v7Actor = await resolveV7ActorFromCurrent(actor);
-  const context = await getTenantContextOptions(v7Actor, false);
-  const visibleBranchIds = context.branches.map((branch) => branch.id);
+  const contextPromise = getTenantContextOptions(v7Actor, false);
+  const concreteBranchIds = concreteBranchGrantIds(v7Actor);
+  const contextBeforeVersions = concreteBranchIds ? null : await contextPromise;
+  const branchIdsForVersionQuery =
+    concreteBranchIds ??
+    contextBeforeVersions?.branches.map((branch) => branch.id) ??
+    [];
 
-  if (visibleBranchIds.length === 0) {
+  if (branchIdsForVersionQuery.length === 0) {
     return {
       generatedAt,
       history: [],
@@ -262,7 +278,7 @@ async function getBranchBiSnapshotUncached(
       "id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,published_at,quality_score",
     )
     .eq("organization_id", actor.scope.organizationId)
-    .in("branch_id", visibleBranchIds)
+    .in("branch_id", branchIdsForVersionQuery)
     .eq("is_demo", false)
     .in("status", ["PUBLISHED", "published"]);
   if (hasScopedFilter(filter.countryId))
@@ -282,10 +298,15 @@ async function getBranchBiSnapshotUncached(
     versionsQuery = versionsQuery.gte("period_end", filter.periodStart);
   if (filter.periodEnd)
     versionsQuery = versionsQuery.lte("period_start", filter.periodEnd);
-  const versionsResult =
+  const versionsPromise =
     load.mode === "history"
-      ? { data: [] as ClosingVersionRow[], error: null }
-      : await versionsQuery;
+      ? Promise.resolve({ data: [] as ClosingVersionRow[], error: null })
+      : versionsQuery;
+  const [context, versionsResult] = await Promise.all([
+    contextPromise,
+    versionsPromise,
+  ]);
+  const visibleBranchIds = context.branches.map((branch) => branch.id);
 
   const versions = ((versionsResult.data ?? []) as ClosingVersionRow[]).filter(
     (version) =>
