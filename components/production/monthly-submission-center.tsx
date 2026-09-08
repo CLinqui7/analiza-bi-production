@@ -15,7 +15,7 @@ import {
   Trash2,
   UploadCloud,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -323,8 +323,9 @@ function FieldInput({
   }
 
   const isNumeric = ["number", "currency", "percent"].includes(field.inputType);
+  const allowsExplicitZero = field.inputType === "number" && field.min === 0 && /(?:count|visit)/.test(field.id);
   const type = field.inputType === "date" ? "date" : field.inputType === "month" ? "month" : isNumeric ? "number" : "text";
-  const step = field.inputType === "currency" ? "0.01" : field.inputType === "percent" ? "0.01" : field.inputType === "number" ? "any" : undefined;
+  const step = field.inputType === "currency" ? "0.01" : field.inputType === "percent" ? "0.01" : allowsExplicitZero ? "1" : field.inputType === "number" ? "any" : undefined;
 
   return (
     <div className="grid gap-1.5">
@@ -336,7 +337,7 @@ function FieldInput({
           step={step}
           min={field.min}
           max={field.max}
-          placeholder={field.placeholder}
+          placeholder={allowsExplicitZero ? "Sin responder" : field.placeholder}
           value={value}
           onChange={(event) => onChange(event.target.value)}
           disabled={disabled}
@@ -346,7 +347,14 @@ function FieldInput({
           <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-muted-foreground">{field.unit}</span>
         )}
       </div>
-      <p className="text-xs text-muted-foreground">{field.description}</p>
+      <p className="text-xs text-muted-foreground">
+        {field.description}{allowsExplicitZero ? " Puedes registrar 0 si la sucursal no cuenta con este personal o no realizó visitas." : ""}
+      </p>
+      {allowsExplicitZero && value === "" && !disabled && (
+        <Button type="button" size="sm" variant="outline" className="w-fit" onClick={() => onChange("0")}>
+          No tenemos / Registrar 0
+        </Button>
+      )}
     </div>
   );
 }
@@ -392,6 +400,7 @@ export function MonthlySubmissionCenter({
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [blockers, setBlockers] = useState<string[]>([]);
+  const contextRevisionRef = useRef(0);
 
   const selectedBranch = selectedAssignment?.branch ?? null;
   const selectedBranchManager = selectedAssignment?.branchManager ?? null;
@@ -494,6 +503,7 @@ export function MonthlySubmissionCenter({
   }, [currentStep, steps.length]);
 
   function markContextChange() {
+    contextRevisionRef.current += 1;
     setSaved(null);
     setAttachments([]);
     setDirty(true);
@@ -504,6 +514,7 @@ export function MonthlySubmissionCenter({
   function changeAssignment(next: string) {
     const assignment = assignments.find((item) => item.id === next);
     if (!assignment) return;
+    if (dirty && (saved || Object.values(values).some((value) => value.trim() !== "")) && !window.confirm("Tienes cambios sin guardar. Cambiar de asignación los conservará separados, pero no los trasladará. ¿Continuar?")) return;
     setAssignmentId(next);
     setCountryId(assignment.country.id);
     setCompanyId(assignment.company.id);
@@ -515,6 +526,7 @@ export function MonthlySubmissionCenter({
   }
 
   function changePeriod(next: string) {
+    if (dirty && (saved || Object.values(values).some((value) => value.trim() !== "")) && !window.confirm("Tienes cambios sin guardar. Cambiar de mes no los trasladará. ¿Continuar?")) return;
     setPeriodMonth(next);
     markContextChange();
   }
@@ -532,12 +544,14 @@ export function MonthlySubmissionCenter({
   }
 
   async function openSubmission(submissionId: string) {
+    const contextRevision = contextRevisionRef.current;
     setBusy("open");
     setMessage(null);
     try {
       const response = await fetch(`/api/monthly-submissions?submissionId=${encodeURIComponent(submissionId)}`, { cache: "no-store" });
       const body = (await response.json()) as SubmissionDetail;
       if (!response.ok || !body.submission || !body.version) throw new Error(body.error ?? "No se pudo abrir el cierre.");
+      if (contextRevision !== contextRevisionRef.current) return;
       const matchingAssignment = assignments.find((item) =>
         item.branch.id === body.submission!.branch_id
         && item.businessLine.id === body.submission!.business_line_id,
@@ -581,6 +595,7 @@ export function MonthlySubmissionCenter({
     }
     setBusy("save");
     setMessage(null);
+    const contextRevision = contextRevisionRef.current;
     try {
       const response = await fetch("/api/monthly-submissions", {
         method: "POST",
@@ -599,6 +614,10 @@ export function MonthlySubmissionCenter({
       });
       const body = (await response.json()) as ApiResult;
       if (!response.ok || !body.submissionId || !body.version) throw new Error(body.message ?? body.error ?? "No se pudo guardar el cierre.");
+      if (contextRevision !== contextRevisionRef.current) {
+        setMessage({ type: "ok", text: "El borrador se guardó en su contexto original; los cambios del contexto actual siguen sin guardar." });
+        return;
+      }
       setSaved({ submissionId: body.submissionId, versionId: body.version.id, versionNumber: body.version.version_number, status: body.version.status });
       setAttachments([]);
       setDirty(false);

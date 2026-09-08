@@ -64,6 +64,10 @@ function numericValue(value: unknown) {
   return null;
 }
 
+function isNonNegativeCountField(field: ManualMonthlyFormField) {
+  return field.inputType === "number" && field.min === 0 && /(?:count|visit)/.test(field.id);
+}
+
 export type FormContractValidation = {
   missing: string[];
   invalid: Array<{ fieldId: string; reason: string }>;
@@ -107,6 +111,10 @@ export function validateMonthlyFormContract({
       }
       if (field.max !== undefined && parsed > field.max) {
         invalid.push({ fieldId: field.id, reason: `MAX_${field.max}` });
+        continue;
+      }
+      if (isNonNegativeCountField(field) && !Number.isInteger(parsed)) {
+        invalid.push({ fieldId: field.id, reason: "NOT_AN_INTEGER" });
         continue;
       }
       normalized[field.id] = parsed;
