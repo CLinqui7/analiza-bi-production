@@ -410,6 +410,7 @@ export function MonthlySubmissionCenter({
   const [warnings, setWarnings] = useState<string[]>([]);
   const [blockers, setBlockers] = useState<string[]>([]);
   const contextRevisionRef = useRef(0);
+  const busyOperationRef = useRef(0);
   const activeContextKeyRef = useRef(monthlyDraftKey(assignments[0]?.id ?? "", options.reportingMonths[0]?.id ?? monthValue()));
   const draftsRef = useRef(new Map<string, MonthlyFormDraft<SavedSubmission, Attachment>>());
 
@@ -543,8 +544,21 @@ export function MonthlySubmissionCenter({
 
   function markContextChange(nextContextKey: string) {
     contextRevisionRef.current += 1;
+    busyOperationRef.current += 1;
     activeContextKeyRef.current = nextContextKey;
+    setBusy(null);
     setMessage(null);
+  }
+
+  function beginBusy(nextBusy: NonNullable<typeof busy>) {
+    const operationId = busyOperationRef.current + 1;
+    busyOperationRef.current = operationId;
+    setBusy(nextBusy);
+    return operationId;
+  }
+
+  function clearBusy(operationId: number) {
+    if (busyOperationRef.current === operationId) setBusy(null);
   }
 
   function switchDraft(nextAssignmentId: string, nextPeriodMonth: string) {
@@ -601,7 +615,7 @@ export function MonthlySubmissionCenter({
     const requestContextKey = activeContextKeyRef.current;
     let completionContextKey = requestContextKey;
     let completionRevision = contextRevision;
-    setBusy("open");
+    const operationId = beginBusy("open");
     setMessage(null);
     try {
       const response = await fetch(`/api/monthly-submissions?submissionId=${encodeURIComponent(submissionId)}`, { cache: "no-store" });
@@ -619,6 +633,7 @@ export function MonthlySubmissionCenter({
       storeActiveDraft();
       const loadedContextKey = monthlyDraftKey(matchingAssignment.id, loadedPeriod);
       markContextChange(loadedContextKey);
+      busyOperationRef.current = operationId;
       const loadedRevision = contextRevisionRef.current;
       completionContextKey = loadedContextKey;
       completionRevision = loadedRevision;
@@ -650,7 +665,7 @@ export function MonthlySubmissionCenter({
         setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo abrir el cierre." });
       }
     } finally {
-      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, completionContextKey, completionRevision)) setBusy(null);
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, completionContextKey, completionRevision)) clearBusy(operationId);
     }
   }
 
@@ -660,7 +675,7 @@ export function MonthlySubmissionCenter({
       setMessage({ type: "error", text: "Selecciona un país, empresa, sucursal, línea y mes válidos." });
       return;
     }
-    setBusy("save");
+    const operationId = beginBusy("save");
     setMessage(null);
     const contextRevision = contextRevisionRef.current;
     const requestContextKey = activeContextKeyRef.current;
@@ -704,7 +719,7 @@ export function MonthlySubmissionCenter({
         setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo guardar el cierre." });
       }
     } finally {
-      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, contextRevision)) setBusy(null);
+      clearBusy(operationId);
     }
   }
 
@@ -757,7 +772,9 @@ export function MonthlySubmissionCenter({
       setMessage({ type: "error", text: `${tooLarge.name} supera el máximo de 15 MB.` });
       return;
     }
-    setBusy("upload");
+    const operationId = beginBusy("upload");
+    const requestContextKey = activeContextKeyRef.current;
+    const requestRevision = contextRevisionRef.current;
     setMessage(null);
     try {
       for (const file of files) {
@@ -781,35 +798,43 @@ export function MonthlySubmissionCenter({
         const finalized = (await finalizeResponse.json()) as { item?: Attachment; error?: string; message?: string };
         if (!finalizeResponse.ok || !finalized.item) throw new Error(finalized.message ?? finalized.error ?? "El archivo se cargó, pero no pudo finalizar su validación.");
       }
-      await loadAttachments(saved.submissionId, saved.versionId);
-      setMessage({ type: "ok", text: "Archivo(s) cargado(s). Los Excel reconocidos se analizan solo en forma agregada para generar KPIs trazables." });
+      await loadAttachments(saved.submissionId, saved.versionId, requestContextKey, requestRevision);
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) {
+        setMessage({ type: "ok", text: "Archivo(s) cargado(s). Los Excel reconocidos se analizan solo en forma agregada para generar KPIs trazables." });
+      }
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudieron cargar los archivos." });
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) {
+        setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudieron cargar los archivos." });
+      }
     } finally {
-      setBusy(null);
+      clearBusy(operationId);
     }
   }
 
   async function deleteAttachment(attachmentId: string) {
     if (!saved || !canWrite || currentVersionPublished) return;
-    setBusy("delete");
+    const operationId = beginBusy("delete");
+    const requestContextKey = activeContextKeyRef.current;
+    const requestRevision = contextRevisionRef.current;
     setMessage(null);
     try {
       const response = await fetch(`/api/monthly-submissions/${saved.submissionId}/attachments?attachmentId=${encodeURIComponent(attachmentId)}&versionId=${encodeURIComponent(saved.versionId)}`, { method: "DELETE" });
       const body = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "No se pudo eliminar el archivo.");
-      await loadAttachments(saved.submissionId, saved.versionId);
-      setMessage({ type: "ok", text: "Archivo eliminado del borrador." });
+      await loadAttachments(saved.submissionId, saved.versionId, requestContextKey, requestRevision);
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) setMessage({ type: "ok", text: "Archivo eliminado del borrador." });
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo eliminar el archivo." });
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo eliminar el archivo." });
     } finally {
-      setBusy(null);
+      clearBusy(operationId);
     }
   }
 
   async function downloadSubmissionReport(format: "xlsx" | "csv" | "pdf") {
     if (!saved) return;
-    setBusy("report");
+    const operationId = beginBusy("report");
+    const requestContextKey = activeContextKeyRef.current;
+    const requestRevision = contextRevisionRef.current;
     setMessage(null);
     try {
       const response = await fetch(
@@ -821,6 +846,7 @@ export function MonthlySubmissionCenter({
         throw new Error(body?.message ?? body?.error ?? "No se pudo generar el reporte.");
       }
       const blob = await response.blob();
+      if (!shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) return;
       const contentDisposition = response.headers.get("content-disposition") ?? "";
       const match = /filename="?([^";]+)"?/i.exec(contentDisposition);
       const fileName = match?.[1] ?? `analiza-cierre-${periodMonth}.${format}`;
@@ -834,15 +860,17 @@ export function MonthlySubmissionCenter({
       URL.revokeObjectURL(url);
       setMessage({ type: "ok", text: `Reporte ${format.toUpperCase()} generado desde la versión guardada.` });
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo generar el reporte." });
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo generar el reporte." });
     } finally {
-      setBusy(null);
+      clearBusy(operationId);
     }
   }
 
   async function publish() {
     if (!saved || !canAttemptPublish) return;
-    setBusy("publish");
+    const operationId = beginBusy("publish");
+    const requestContextKey = activeContextKeyRef.current;
+    const requestRevision = contextRevisionRef.current;
     setMessage(null);
     try {
       const response = await fetch("/api/monthly-submissions/publish", {
@@ -852,13 +880,14 @@ export function MonthlySubmissionCenter({
       });
       const body = (await response.json()) as { closingVersionId?: string; kpiCount?: number; error?: string; message?: string };
       if (!response.ok) throw new Error(body.message ?? body.error ?? "No se pudo publicar el cierre.");
+      if (!shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) return;
       setSaved((current) => current ? { ...current, status: "published" } : current);
       setMessage({ type: "ok", text: `Cierre publicado. Se generaron ${body.kpiCount ?? 0} KPI(s) con trazabilidad al formulario y, cuando aplica, al archivo estructurado.` });
       if (showRecent) await refreshRecent();
     } catch (error) {
-      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo publicar el cierre." });
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo publicar el cierre." });
     } finally {
-      setBusy(null);
+      clearBusy(operationId);
     }
   }
 
