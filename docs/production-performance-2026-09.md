@@ -30,14 +30,14 @@ Una segunda corrida de control, sin cambios desplegados, dio 848 ms de mediana p
 
 ## Medición posterior remota
 
-El candidato final `340daca` se verificó ya detrás del alias productivo con el mismo QA efímero, región y cinco solicitudes no-cacheadas. La sesión de prueba comprobó A/Laboratorio y B/Fisioterapia, mantuvo C fuera de listas y obtuvo `404` al intentar una escritura directa en C bajo RLS.
+El candidato final `47da8af` se verificó ya detrás del alias productivo con el mismo QA efímero, región y cinco solicitudes no-cacheadas. La sesión de prueba comprobó A/Laboratorio y B/Fisioterapia, mantuvo C fuera de listas y obtuvo `404` al intentar una escritura directa en C bajo RLS.
 
 | Operación | Antes (mediana) | Después (mediana) | Rango posterior | Muestras |
 | --- | ---: | ---: | ---: | ---: |
-| `/api/context/options` | 1003 ms | 620 ms | 521–801 ms | 5 / 5 |
-| `/api/auth/session` | 565 ms | 450 ms | 415–476 ms | 5 / 5 |
+| `/api/context/options` | 1003 ms | 745 ms | 678–1013 ms | 5 / 5 |
+| `/api/auth/session` | 565 ms | 582 ms | 467–694 ms | 5 / 5 |
 
-La mejora de contexto frente a la primera línea base es 383 ms (38 %). Frente a la corrida de control previa (848 ms) es 228 ms (27 %); esta segunda comparación es más conservadora y se reporta porque las muestras son pequeñas. `Server-Timing: app` posterior quedó entre 413.3 y 666.7 ms. El tiempo de login no se usa como comparación: la primera y última corrida no comparten una latencia de red estable.
+La mejora de contexto frente a la primera línea base es 258 ms (26 %). Frente a la corrida de control previa (848 ms) es 103 ms (12 %); esta segunda comparación es más conservadora y se reporta porque las muestras son pequeñas. `Server-Timing: app` posterior quedó entre 529.9 y 892.3 ms. El tiempo de login y sesión no se presentan como mejoras: la red varió entre corridas.
 
 ## Trabajo eliminado y límites
 
