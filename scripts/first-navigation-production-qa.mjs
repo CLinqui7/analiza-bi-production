@@ -80,6 +80,13 @@ async function firstVisibleLink(page, pathname) {
 
 async function verifyPeriodControl(page) {
   const periodButton = page.getByRole("button", { name: /periodo|filtros/i });
+  if ((await periodButton.count()) === 0) {
+    await page.getByText("Acceso de sucursal", { exact: true }).waitFor({
+      state: "visible",
+      timeout: navigationTimeoutMs,
+    });
+    return "branch_scope_lock_verified";
+  }
   await periodButton.click();
   const from = page.getByLabel("Fecha desde");
   const to = page.getByLabel("Fecha hasta");
@@ -240,6 +247,9 @@ async function navigate(page, routeName, scenario, hoverMs) {
     );
     await marker.waitFor({ state: "visible", timeout: navigationTimeoutMs });
     const contentReadyMs = Math.round(Date.now() - clickedAt);
+    const traceMarker = page.locator("[data-navigation-trace]").last();
+    const traceValue = await traceMarker.getAttribute("data-navigation-trace");
+    const serverTrace = traceValue ? JSON.parse(traceValue) : null;
     const usableControl = await verifyUsability(page, routeName);
     const usableMs = Math.round(Date.now() - clickedAt);
     await awaitRscFinishers(finishers);
@@ -257,6 +267,7 @@ async function navigate(page, routeName, scenario, hoverMs) {
       rscResponses,
       route: routeName,
       scenario,
+      serverTrace,
       targetRequests,
       usableControl,
       usableMs,
@@ -384,8 +395,16 @@ try {
 
   const now = new Date().toISOString();
   const scopes = [
-    { ...branchA, business_line_id: laboratoryLine.id },
-    { ...branchB, business_line_id: physiotherapyLine.id },
+    {
+      ...branchA,
+      business_line_code: laboratoryLine.code,
+      business_line_id: laboratoryLine.id,
+    },
+    {
+      ...branchB,
+      business_line_code: physiotherapyLine.code,
+      business_line_id: physiotherapyLine.id,
+    },
   ];
   const { error: profileError } = await admin.from("profiles").upsert({
     default_branch_id: branchA.id,
@@ -404,6 +423,8 @@ try {
     admin.from("user_roles").insert(
       scopes.map((branch) => ({
         branch_id: branch.id,
+        business_line_code: branch.business_line_code,
+        business_line_id: branch.business_line_id,
         company_id: branch.company_id,
         country_id: branch.country_id,
         operational_area_id: branch.operational_area_id,
@@ -416,6 +437,8 @@ try {
     admin.from("manager_assignments").insert(
       scopes.map((branch) => ({
         branch_id: branch.id,
+        business_line_code: branch.business_line_code,
+        business_line_id: branch.business_line_id,
         company_id: branch.company_id,
         country_id: branch.country_id,
         metadata: { source: "first-navigation-production-qa" },

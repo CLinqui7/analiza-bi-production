@@ -7,6 +7,12 @@ const traceCookieName = "analiza-navigation-trace";
 export type NavigationPerformanceTrace = {
   requestId: string;
   route: string;
+  stages: NavigationPerformanceStage[];
+};
+
+export type NavigationPerformanceStage = {
+  durationMs: number;
+  stage: string;
 };
 
 /**
@@ -19,7 +25,7 @@ export async function getNavigationPerformanceTrace(
   const cookieStore = await cookies();
   const requestId = cookieStore.get(traceCookieName)?.value;
   return requestId && /^[a-f0-9]{12,32}$/.test(requestId)
-    ? { requestId, route }
+    ? { requestId, route, stages: [] }
     : null;
 }
 
@@ -37,15 +43,10 @@ export async function traceNavigationStage<T>(
   try {
     return await operation();
   } finally {
-    console.info(
-      "[navigation-trace]",
-      JSON.stringify({
-        durationMs: Math.round(performance.now() - startedAt),
-        requestId: trace.requestId,
-        route: trace.route,
-        stage,
-      }),
-    );
+    trace.stages.push({
+      durationMs: Math.round(performance.now() - startedAt),
+      stage,
+    });
   }
 }
 
@@ -57,13 +58,8 @@ export function traceNavigationReady(
     return;
   }
 
-  console.info(
-    "[navigation-trace]",
-    JSON.stringify({
-      durationMs: Math.round(performance.now() - startedAt),
-      requestId: trace.requestId,
-      route: trace.route,
-      stage: "server_component_ready",
-    }),
-  );
+  trace.stages.push({
+    durationMs: Math.round(performance.now() - startedAt),
+    stage: "server_component_ready",
+  });
 }

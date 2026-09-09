@@ -1,6 +1,7 @@
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { getBranchBiSnapshot, type BranchBiFilter } from "@/lib/v7/server/branch-bi-snapshot";
 import { OfficialBranchBiDashboard } from "@/components/official-branch-bi-dashboard";
+import { NavigationPerformanceTraceMarker } from "@/components/navigation-performance-trace-marker";
 import {
   traceNavigationReady,
   traceNavigationStage,
@@ -28,5 +29,8 @@ export async function BranchBiServerDashboard({
     }),
   );
   traceNavigationReady(trace, startedAt);
-  return <OfficialBranchBiDashboard mode={mode} roleKey={actor.roleKey} snapshot={snapshot} />;
+  return <>
+    <OfficialBranchBiDashboard mode={mode} roleKey={actor.roleKey} snapshot={snapshot} />
+    <NavigationPerformanceTraceMarker trace={trace} />
+  </>;
 }

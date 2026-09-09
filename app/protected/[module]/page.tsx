@@ -13,6 +13,7 @@ import { ImagingPresentationDashboard } from "@/components/imaging-presentation-
 import { ImportOperationsDashboard } from "@/components/import-operations-dashboard";
 import { LaboratoryPresentationDashboard } from "@/components/laboratory-presentation-dashboard";
 import { MonthlyClosureRouter } from "@/components/monthly-closure-router";
+import { NavigationPerformanceTraceMarker } from "@/components/navigation-performance-trace-marker";
 import { OfficialManagerIncentiveDirectory } from "@/components/official-manager-incentive-directory";
 import { OperationsModule } from "@/components/operations-modules";
 import { PatientFlowDemandDashboard } from "@/components/patient-flow-demand-dashboard";
@@ -115,6 +116,7 @@ async function OfficialDataModule({
   return (
     <div data-route-content-ready={`official-${mode}`}>
       <OfficialExecutiveDataDashboard mode={mode} snapshot={snapshot} />
+      <NavigationPerformanceTraceMarker trace={trace} />
     </div>
   );
 }
@@ -164,6 +166,7 @@ async function OfficialDataQualityModule({
   return (
     <div data-route-content-ready="official-data-quality">
       <OfficialDataQualityDashboard snapshot={snapshot} />
+      <NavigationPerformanceTraceMarker trace={trace} />
     </div>
   );
 }
