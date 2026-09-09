@@ -192,11 +192,41 @@ async function clientWork(page, clickPerformanceTime) {
 
 async function navigate(page, routeName, scenario, hoverMs) {
   const route = routes[routeName];
+  const cdp = await page.context().newCDPSession(page);
   const targetRequests = [];
   const rscResponses = [];
+  const rscStreams = new Map();
   const finishers = [];
   let clickedAt = null;
   let clickPerformanceTime = null;
+
+  await cdp.send("Network.enable");
+  cdp.on("Network.requestWillBeSent", (event) => {
+    const url = new URL(event.request.url);
+    if (url.pathname !== route.pathname || !url.searchParams.has("_rsc")) {
+      return;
+    }
+    rscStreams.set(event.requestId, {
+      bytes: 0,
+      firstByteMs: null,
+      lastByteMs: null,
+      phase: clickedAt === null ? "before_click" : "after_click",
+      streamCompletedMs: null,
+    });
+  });
+  cdp.on("Network.dataReceived", (event) => {
+    const stream = rscStreams.get(event.requestId);
+    if (!stream || clickedAt === null) return;
+    const elapsed = Math.round(Date.now() - clickedAt);
+    stream.bytes += event.dataLength;
+    stream.firstByteMs ??= elapsed;
+    stream.lastByteMs = elapsed;
+  });
+  cdp.on("Network.loadingFinished", (event) => {
+    const stream = rscStreams.get(event.requestId);
+    if (!stream || clickedAt === null) return;
+    stream.streamCompletedMs = Math.round(Date.now() - clickedAt);
+  });
 
   const requestListener = (request) => {
     if (!isRscRequest(request, route.pathname)) return;
@@ -257,15 +287,26 @@ async function navigate(page, routeName, scenario, hoverMs) {
     const targetPattern = new RegExp(
       `${route.pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\?|$)`,
     );
-    await Promise.all([
-      page.waitForURL(targetPattern, { timeout: navigationTimeoutMs }),
-      link.click(),
-    ]);
     const marker = page.locator(
       `[data-route-content-ready="${route.marker}"]`,
     );
-    await marker.waitFor({ state: "visible", timeout: navigationTimeoutMs });
-    const contentReadyMs = Math.round(Date.now() - clickedAt);
+    const contentReady = marker
+      .waitFor({ state: "visible", timeout: navigationTimeoutMs })
+      .then(() => Math.round(Date.now() - clickedAt));
+    const urlUpdated = page
+      .waitForURL(targetPattern, {
+        timeout: navigationTimeoutMs,
+        waitUntil: "commit",
+      })
+      .then(() => Math.round(Date.now() - clickedAt));
+    await Promise.all([
+      urlUpdated,
+      link.click(),
+    ]);
+    const [contentReadyMs, urlUpdatedMs] = await Promise.all([
+      contentReady,
+      urlUpdated,
+    ]);
     const current = new URL(page.url());
     const traceValues = await page
       .locator("[data-navigation-trace]")
@@ -291,6 +332,7 @@ async function navigate(page, routeName, scenario, hoverMs) {
       contentReadyMs,
       feedbackMs: await pendingFeedback,
       rscResponses,
+      rscStreams: Array.from(rscStreams.values()),
       route: routeName,
       scenario,
       serverTrace,
@@ -299,10 +341,12 @@ async function navigate(page, routeName, scenario, hoverMs) {
       targetRequests,
       usableControl,
       usableMs,
+      urlUpdatedMs,
     };
   } finally {
     page.off("request", requestListener);
     page.off("response", responseListener);
+    await cdp.detach();
   }
 }
 
@@ -412,7 +456,10 @@ async function createAuthenticatedPage({ trace }) {
   await page.goto(`${baseUrl}${seedPath(traceRequestId)}`, {
     waitUntil: "domcontentloaded",
   });
-  await firstVisibleLink(page, routes.results.pathname);
+  await page
+    .locator(`${hrefSelector(routes.results.pathname)}:visible`)
+    .first()
+    .waitFor({ state: "visible", timeout: navigationTimeoutMs });
   return { context, loginMs, page };
 }
 

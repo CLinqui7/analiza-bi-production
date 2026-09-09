@@ -91,3 +91,48 @@ Por tanto, el objetivo de 300 ms se cumple en esta muestra para las rutas prepar
 La diferencia frente a la corrida rápida previa de revisitas (mediana 1411 ms) se interpreta sólo para el escenario preparado/revisitado equivalente; no se extrapola a primeras cargas ni a otras redes. La próxima optimización, si se autoriza una nueva fase, debe instrumentar por separado las consultas y la hidratación de esas tres primeras entradas antes de cambiar índices, regiones o políticas de caché.
 
 La matriz funcional autenticada de producción terminó con `authenticatedRoles: PASS` y `qaCleanup: PASS`. Además, `runtime-service-role-qa` confirmó A y B permitidas, C denegada, escritura directa a C denegada con `404`, filtros correctos y runtime de service role correcto. La prueba de Metas ahora espera su marcador de contenido final después del streaming; valida el período explícito, meta aprobada, resultado publicado y cálculo de cumplimiento, no el skeleton inicial.
+
+## Segunda optimización: primeras entradas sin precarga (2026-09-09)
+
+El candidato de código `5e2d47a` está publicado como `dpl_Annz4MuPqZhXxZeHE66RvYn7uFvD` (IAD1) detrás de `https://web-clinqui7s-projects.vercel.app`. Se desplegó desde un archivo limpio: no incluye `next-env.d.ts` ni trabajo local ajeno. El deployment anterior `dpl_CDx2HyS5vmeqNZ5Egtx8W1BBV9fN` queda disponible como rollback.
+
+### Cambio acotado y seguridad
+
+`/protected/plantillas` y `/protected/metas` ahora tienen entradas estáticas propias y no atraviesan el despachador dinámico de módulos protegidos. Esto evita que la primera transición de esas dos pantallas solicite el conjunto de módulos no relacionados. La autorización, los grants y los filtros por organización, sucursal, línea y período siguen en servidor por petición; no se añadieron cachés HTTP públicas, índices, migraciones, cambios de región ni dependencias.
+
+El marcador de diagnóstico sólo acepta un identificador QA opaco de 24 caracteres hexadecimales y contiene tiempos y nombres de etapas, nunca filtros, cuerpos, IDs de negocio, credenciales ni cookies. La cuenta QA efímera crea sólo grants A/Laboratorio y B/Fisioterapia, no escribe cierres, y se elimina junto con profile y grants en `finally`. La comprobación posterior obtuvo `QA_REMAINING=0`.
+
+### Metodología corregida
+
+El runner `scripts/first-navigation-production-qa.mjs` conserva el período explícito `2026-07-01` a `2026-07-31`, usa un contexto de navegador nuevo para cada primera visita y registra las solicitudes RSC que comienzan antes del clic. URL y marcador de contenido final se esperan en paralelo: el indicador de contenido no queda detrás de una espera auxiliar de URL. El navegador registra por petición headers, primer y último byte RSC, bytes/scripts posteriores, tareas largas y aparición del marcador; la traza del servidor correlaciona autenticación, grants, catálogos, consultas y composición.
+
+Cada muestra A tuvo cero solicitudes objetivo antes del clic. El control funcional no se limita a URL o skeleton: Formulario edita y restaura un campo sin guardar; Historial y Resultados esperan su vista BI y verifican el bloqueo de alcance de sucursal; Metas verifica el bloqueo de alcance. Los valores siguientes son muestras remotas, no pruebas de carga ni p95.
+
+| Ruta | Escenario A: no visitada, sin precarga | Feedback (ms) | Contenido final (ms) | Usable (ms) | Muestras |
+| --- | --- | ---: | ---: | ---: | --- |
+| Formulario | A | 63, 53, 49 | 819, 854, 815 | 993, 1031, 1007 | 3 |
+| Historial | A | 63, 62, 71 | 844, 812, 826 | 859, 825, 839 | 3 |
+| Resultados | A | 46, 55, 50 | 810, 815, 808 | 822, 827, 820 | 3 |
+| Metas | A | 61, 54, 57 | 820, 826, 824 | 834, 837, 836 | 3 |
+
+| Ruta | Escenario separado | Feedback (ms) | Contenido final (ms) | Solicitud antes del clic | Muestras |
+| --- | --- | ---: | ---: | --- | --- |
+| Formulario | B, hover 175 ms | 72 | 836 | sí; todavía no había finalizado | 1 |
+| Historial | B, hover 175 ms | 53 | 825 | sí; todavía no había finalizado | 1 |
+| Resultados | B, hover 175 ms | 51 | 835 | sí; todavía no había finalizado | 1 |
+| Metas | B, hover 175 ms | 54 | 813 | sí; todavía no había finalizado | 1 |
+| Resultados | C, preparado durante 1800 ms | 53 | 95 | sí; completado antes del clic | 1 |
+| Metas | D, transición intermedia | 46 | 102 | ruta en caché del router | 1 |
+| Resultados | D, revisita | 33 | 89 | ruta en caché del router | 1 |
+
+### Trazas y decisión
+
+En A, los headers llegaron en 133–172 ms; la última porción RSC observada llegó aproximadamente en 426–558 ms. La autorización inicial más composición de servidor quedó aproximadamente entre 0.28 y 0.36 s en las muestras centrales, con un outlier de grants observado y reportado en otra corrida. Tras separar rutas, el navegador descargó `0 B` de scripts y no tuvo tareas largas después del clic para las 12 muestras A. Antes del cambio, Formulario y Metas descargaban el mismo conjunto de módulos no relacionados (`289,716 B` en la corrida diagnóstica) al abrirse desde la ruta dinámica.
+
+La pantalla final todavía se consolida unos 0.30–0.37 s después del último byte RSC observado. Por ello no se atribuye la demora restante a hidratación: no hubo descarga de JS ni tareas largas en ese tramo. La evidencia apunta a la entrega/consolidación del flujo RSC privado y del router; no se cambian consultas, cachés o infraestructura a ciegas. La meta de 300 ms se cumple para C y D (89–102 ms), y el feedback de todas las rutas A queda por debajo de 100 ms. No se cumple aún para primeras visitas A (medianas aproximadas 819–826 ms).
+
+La comparación temporal anterior de 1111–1644 ms no se mezcla con A: aquella medición no tenía la misma espera paralela de contenido ni los mismos límites de stream. El antes/después directamente demostrado es la transferencia no relacionada, de 289,716 B a 0 B tras el clic; los tiempos A se publican como muestras separadas, sin porcentajes de mejora no comparables.
+
+### Validación y rollback
+
+Se ejecutaron lint, typecheck, la suite de pruebas, escaneo de secretos y build local. La regresión autenticada de producción se repite contra el alias final. El rollback es reasignar el alias a `dpl_CDx2HyS5vmeqNZ5Egtx8W1BBV9fN` o revertir `770a51f`; no requiere esquema, RLS, variables ni proveedores nuevos.
