@@ -1,7 +1,4 @@
-import { LaboratoryVerticalDashboard } from "@/components/laboratory-vertical-dashboard";
 import { MonthlySubmissionCenter } from "@/components/production/monthly-submission-center";
-import { ImagingVerticalDashboard } from "@/components/imaging-vertical-dashboard";
-import { PhysiotherapyVerticalDashboard } from "@/components/physiotherapy-vertical-dashboard";
 import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard";
 import { NavigationPerformanceTraceMarker } from "@/components/navigation-performance-trace-marker";
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
@@ -165,10 +162,14 @@ export async function MonthlyClosureRouter({
   }
 
   if (selectedLine === "laboratorio") {
+    const { LaboratoryVerticalDashboard } =
+      await import("@/components/laboratory-vertical-dashboard");
     return <LaboratoryVerticalDashboard mode={mode} />;
   }
 
   if (selectedLine === "imagenes") {
+    const { ImagingVerticalDashboard } =
+      await import("@/components/imaging-vertical-dashboard");
     return <ImagingVerticalDashboard mode={mode} />;
   }
 
@@ -188,5 +189,7 @@ export async function MonthlyClosureRouter({
     );
   }
 
+  const { PhysiotherapyVerticalDashboard } =
+    await import("@/components/physiotherapy-vertical-dashboard");
   return <PhysiotherapyVerticalDashboard mode={mode} />;
 }
