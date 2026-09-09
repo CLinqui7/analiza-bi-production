@@ -24,7 +24,7 @@ async function TemplatesGate({
   await connection();
 
   const params = searchParams ? await searchParams : {};
-  const trace = await getNavigationPerformanceTrace("plantillas", params.qaTrace);
+  const trace = await getNavigationPerformanceTrace("form", params.qaTrace);
   const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
     requireProtectedPath("/protected/plantillas"),
   );

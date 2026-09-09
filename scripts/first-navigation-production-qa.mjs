@@ -5,7 +5,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
 import { chromium } from "playwright";
 
-const defaultBaseUrl = "https://web-clinqui7s-projects.vercel.app";
+const defaultBaseUrl =
+  process.env.QA_BASE_URL ?? "https://web-clinqui7s-projects.vercel.app";
 const navigationTimeoutMs = 20_000;
 const expectedPeriod = { from: "2026-07-01", to: "2026-07-31" };
 function seedPath(traceRequestId) {
@@ -360,6 +361,13 @@ const requestedRouteNames = process.env.QA_ROUTE_NAMES
     )
   : Object.keys(routes);
 const onlyUnprepared = process.env.QA_ONLY_UNPREPARED === "1";
+const requestedRepeatCount = Number.parseInt(process.env.QA_REPEATS ?? "1", 10);
+const repeatCount =
+  Number.isSafeInteger(requestedRepeatCount) &&
+  requestedRepeatCount > 0 &&
+  requestedRepeatCount <= 10
+    ? requestedRepeatCount
+    : 1;
 let browser;
 let userId;
 
@@ -485,23 +493,33 @@ try {
   const loginSamples = [];
 
   for (const routeName of requestedRouteNames) {
-    const session = await createAuthenticatedPage({ trace: true });
-    loginSamples.push(session.loginMs);
-    try {
-      measurements.push(await navigate(session.page, routeName, "unprepared", 0));
-    } finally {
-      await session.context.close();
+    for (let sample = 1; sample <= repeatCount; sample += 1) {
+      const session = await createAuthenticatedPage({ trace: true });
+      loginSamples.push(session.loginMs);
+      try {
+        measurements.push({
+          ...(await navigate(session.page, routeName, "unprepared", 0)),
+          sample,
+        });
+      } finally {
+        await session.context.close();
+      }
     }
   }
 
   if (!onlyUnprepared) {
     for (const routeName of requestedRouteNames) {
-      const session = await createAuthenticatedPage({ trace: false });
-      loginSamples.push(session.loginMs);
-      try {
-        measurements.push(await navigate(session.page, routeName, "brief_hover_175ms", 175));
-      } finally {
-        await session.context.close();
+      for (let sample = 1; sample <= repeatCount; sample += 1) {
+        const session = await createAuthenticatedPage({ trace: false });
+        loginSamples.push(session.loginMs);
+        try {
+          measurements.push({
+            ...(await navigate(session.page, routeName, "brief_hover_175ms", 175)),
+            sample,
+          });
+        } finally {
+          await session.context.close();
+        }
       }
     }
   }
