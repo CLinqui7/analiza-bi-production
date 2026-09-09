@@ -13,7 +13,7 @@ function seedPath(traceRequestId) {
     from: expectedPeriod.from,
     to: expectedPeriod.to,
   });
-  if (traceRequestId) searchParams.set("_qaTrace", traceRequestId);
+  if (traceRequestId) searchParams.set("qaTrace", traceRequestId);
   return `/protected/mi-sucursal?${searchParams.toString()}`;
 }
 
@@ -254,15 +254,22 @@ async function navigate(page, routeName, scenario, hoverMs) {
     );
     await marker.waitFor({ state: "visible", timeout: navigationTimeoutMs });
     const contentReadyMs = Math.round(Date.now() - clickedAt);
-    const traceMarker = page.locator("[data-navigation-trace]").last();
-    const traceValue = await traceMarker.getAttribute("data-navigation-trace");
-    const serverTrace = traceValue ? JSON.parse(traceValue) : null;
+    const current = new URL(page.url());
+    const traceValues = await page
+      .locator("[data-navigation-trace]")
+      .evaluateAll((elements) =>
+        elements
+          .map((element) => element.getAttribute("data-navigation-trace"))
+          .filter((value) => Boolean(value)),
+      );
+    const parsedTraces = traceValues.map((value) => JSON.parse(value));
+    const serverTrace = parsedTraces.findLast(
+      (candidate) => candidate.route === routeName,
+    ) ?? null;
     const usableControl = await verifyUsability(page, routeName);
     const usableMs = Math.round(Date.now() - clickedAt);
     await awaitRscFinishers(finishers);
     const client = await clientWork(page, clickPerformanceTime);
-    const current = new URL(page.url());
-
     assert.equal(current.pathname, route.pathname, "ROUTE_PATH_MISMATCH");
     assert.equal(current.searchParams.get("from"), expectedPeriod.from, "ROUTE_PERIOD_FROM_MISMATCH");
     assert.equal(current.searchParams.get("to"), expectedPeriod.to, "ROUTE_PERIOD_TO_MISMATCH");
@@ -275,6 +282,8 @@ async function navigate(page, routeName, scenario, hoverMs) {
       route: routeName,
       scenario,
       serverTrace,
+      traceMarkerCount: parsedTraces.length,
+      traceQueryPresent: current.searchParams.has("qaTrace"),
       targetRequests,
       usableControl,
       usableMs,

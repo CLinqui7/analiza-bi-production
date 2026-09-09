@@ -10,7 +10,7 @@ import {
 
 type ClosuresPageProps = {
   searchParams?: Promise<{
-    _qaTrace?: string;
+    qaTrace?: string;
     area?: string;
     branch?: string;
     company?: string;
@@ -30,7 +30,7 @@ async function ClosuresGate({
   await connection();
 
   const params = searchParams ? await searchParams : {};
-  const trace = await getNavigationPerformanceTrace("history", params._qaTrace);
+  const trace = await getNavigationPerformanceTrace("history", params.qaTrace);
   const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
     requireProtectedPath("/protected/cierres"),
   );
