@@ -332,6 +332,7 @@ let userId;
 
 async function createAuthenticatedPage({ trace }) {
   const context = await browser.newContext();
+  const traceRequestId = trace ? randomBytes(12).toString("hex") : null;
   await context.addInitScript(() => {
     window.__qaNavigationSaveData = true;
     window.__qaNavigationLongTasks = [];
@@ -348,18 +349,12 @@ async function createAuthenticatedPage({ trace }) {
       }
     }).observe({ entryTypes: ["longtask"] });
   });
-  if (trace) {
-    await context.addCookies([
-      {
-        name: "analiza-navigation-trace",
-        sameSite: "Lax",
-        secure: true,
-        url: baseUrl,
-        value: randomBytes(12).toString("hex"),
-      },
-    ]);
-  }
   const page = await context.newPage();
+  if (traceRequestId) {
+    await page.setExtraHTTPHeaders({
+      "x-analiza-navigation-trace": traceRequestId,
+    });
+  }
   const loginStartedAt = Date.now();
   await page.goto(`${baseUrl}/auth/login`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: navigationTimeoutMs });
@@ -500,7 +495,7 @@ try {
         briefHoverMs: 175,
         freshContextPerFirstVisit: true,
         preClickRequestsRecorded: true,
-        traceCookie: "opaque per-request QA identifier",
+        traceHeader: "opaque per-request QA identifier",
       },
     }),
   );
