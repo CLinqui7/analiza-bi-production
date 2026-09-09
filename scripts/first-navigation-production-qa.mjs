@@ -180,6 +180,11 @@ async function clientWork(page, clickPerformanceTime) {
       scriptMaxDurationMs: Math.round(
         Math.max(0, ...scripts.map((entry) => entry.duration)),
       ),
+      scriptResources: scripts.map((entry) => ({
+        durationMs: Math.round(entry.duration),
+        path: new URL(entry.name).pathname,
+        transferBytes: entry.transferSize,
+      })),
       scriptTransferBytes: scripts.reduce(
         (sum, entry) => sum + entry.transferSize,
         0,
@@ -354,6 +359,12 @@ if (!laboratoryLine || !physiotherapyLine || !branchA || !branchB) {
 
 const email = `qa.first-navigation.${Date.now()}.${randomBytes(4).toString("hex")}@labanaliza.com`;
 const password = `Qa-${randomBytes(24).toString("base64url")}-9`;
+const requestedRouteNames = process.env.QA_ROUTE_NAMES
+  ? process.env.QA_ROUTE_NAMES.split(",").filter((routeName) =>
+      Object.hasOwn(routes, routeName),
+    )
+  : Object.keys(routes);
+const onlyUnprepared = process.env.QA_ONLY_UNPREPARED === "1";
 let browser;
 let userId;
 
@@ -482,7 +493,7 @@ try {
   const measurements = [];
   const loginSamples = [];
 
-  for (const routeName of Object.keys(routes)) {
+  for (const routeName of requestedRouteNames) {
     const session = await createAuthenticatedPage({ trace: true });
     loginSamples.push(session.loginMs);
     try {
@@ -492,24 +503,28 @@ try {
     }
   }
 
-  for (const routeName of Object.keys(routes)) {
-    const session = await createAuthenticatedPage({ trace: false });
-    loginSamples.push(session.loginMs);
-    try {
-      measurements.push(await navigate(session.page, routeName, "brief_hover_175ms", 175));
-    } finally {
-      await session.context.close();
+  if (!onlyUnprepared) {
+    for (const routeName of requestedRouteNames) {
+      const session = await createAuthenticatedPage({ trace: false });
+      loginSamples.push(session.loginMs);
+      try {
+        measurements.push(await navigate(session.page, routeName, "brief_hover_175ms", 175));
+      } finally {
+        await session.context.close();
+      }
     }
   }
 
-  const prepared = await createAuthenticatedPage({ trace: false });
-  loginSamples.push(prepared.loginMs);
-  try {
-    measurements.push(await navigate(prepared.page, "results", "prepared_1800ms", 1_800));
-    measurements.push(await navigate(prepared.page, "targets", "intermediate_for_revisit", 0));
-    measurements.push(await navigate(prepared.page, "results", "revisit", 0));
-  } finally {
-    await prepared.context.close();
+  if (!onlyUnprepared) {
+    const prepared = await createAuthenticatedPage({ trace: false });
+    loginSamples.push(prepared.loginMs);
+    try {
+      measurements.push(await navigate(prepared.page, "results", "prepared_1800ms", 1_800));
+      measurements.push(await navigate(prepared.page, "targets", "intermediate_for_revisit", 0));
+      measurements.push(await navigate(prepared.page, "results", "revisit", 0));
+    } finally {
+      await prepared.context.close();
+    }
   }
 
   assert.ok(measurements.every((measurement) => measurement.feedbackMs !== null), "PENDING_FEEDBACK_MISSING");
