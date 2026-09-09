@@ -56,6 +56,8 @@ const operationsModuleSlugs = ["gerentes"] as const;
 const staticProtectedModuleSlugs = new Set([
   "cierres",
   "mi-sucursal",
+  "metas",
+  "plantillas",
   "resultados",
 ]);
 
