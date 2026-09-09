@@ -3,9 +3,24 @@ import { connection } from "next/server";
 import { Suspense } from "react";
 
 import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard";
+import { BusinessModuleDashboard } from "@/components/business-module-dashboard";
+import { CapacityOccupancyDashboard } from "@/components/capacity-occupancy-dashboard";
+import { AccountProfileDashboard } from "@/components/account-profile-dashboard";
+import { CrmConnectorsDashboard } from "@/components/crm-connectors-dashboard";
+import { DataQualityAnaliaDashboard } from "@/components/data-quality-analia-dashboard";
+import { ExecutiveOperationDashboard } from "@/components/executive-operation-dashboard";
+import { ImagingPresentationDashboard } from "@/components/imaging-presentation-dashboard";
+import { ImportOperationsDashboard } from "@/components/import-operations-dashboard";
+import { LaboratoryPresentationDashboard } from "@/components/laboratory-presentation-dashboard";
 import { MonthlyClosureRouter } from "@/components/monthly-closure-router";
 import { NavigationPerformanceTraceMarker } from "@/components/navigation-performance-trace-marker";
+import { OfficialManagerIncentiveDirectory } from "@/components/official-manager-incentive-directory";
+import { OperationsModule } from "@/components/operations-modules";
+import { PatientFlowDemandDashboard } from "@/components/patient-flow-demand-dashboard";
+import { PhysiotherapyPresentationDashboard } from "@/components/physiotherapy-presentation-dashboard";
+import { ProfessionalPerformanceDashboard } from "@/components/professional-performance-dashboard";
 import { ProtectedRouteLoading } from "@/components/protected-route-loading";
+import { ServicePortfolioDashboard } from "@/components/service-portfolio-dashboard";
 import { Badge } from "@/components/ui/badge";
 import { moduleConfigs } from "@/lib/analytics/demo-business-modules";
 import { navigationItems } from "@/lib/navigation";
@@ -199,14 +214,10 @@ export default async function ModulePage({
   const Icon = item.icon;
 
   if (module === "citas") {
-    const { PatientFlowDemandDashboard } =
-      await import("@/components/patient-flow-demand-dashboard");
     return <PatientFlowDemandDashboard />;
   }
 
   if (module === "capacidad") {
-    const { CapacityOccupancyDashboard } =
-      await import("@/components/capacity-occupancy-dashboard");
     return <CapacityOccupancyDashboard />;
   }
 
@@ -231,32 +242,22 @@ export default async function ModulePage({
   }
 
   if (module === "profesionales") {
-    const { ProfessionalPerformanceDashboard } =
-      await import("@/components/professional-performance-dashboard");
     return <ProfessionalPerformanceDashboard />;
   }
 
   if (module === "servicios") {
-    const { ServicePortfolioDashboard } =
-      await import("@/components/service-portfolio-dashboard");
     return <ServicePortfolioDashboard />;
   }
 
   if (module === "laboratorio") {
-    const { LaboratoryPresentationDashboard } =
-      await import("@/components/laboratory-presentation-dashboard");
     return <LaboratoryPresentationDashboard />;
   }
 
   if (module === "fisioterapia") {
-    const { PhysiotherapyPresentationDashboard } =
-      await import("@/components/physiotherapy-presentation-dashboard");
     return <PhysiotherapyPresentationDashboard />;
   }
 
   if (module === "imagenes") {
-    const { ImagingPresentationDashboard } =
-      await import("@/components/imaging-presentation-dashboard");
     return <ImagingPresentationDashboard />;
   }
 
@@ -272,14 +273,10 @@ export default async function ModulePage({
   }
 
   if (module === "importaciones") {
-    const { ImportOperationsDashboard } =
-      await import("@/components/import-operations-dashboard");
     return <ImportOperationsDashboard roleKey={actor.roleKey} />;
   }
 
   if (module === "gerentes" && !isDemoRuntimeEnvironment()) {
-    const { OfficialManagerIncentiveDirectory } =
-      await import("@/components/official-manager-incentive-directory");
     return <OfficialManagerIncentiveDirectory />;
   }
 
@@ -297,8 +294,6 @@ export default async function ModulePage({
   }
 
   if (module === "conectores" || module === "apis") {
-    const { CrmConnectorsDashboard } =
-      await import("@/components/crm-connectors-dashboard");
     return <CrmConnectorsDashboard />;
   }
 
@@ -307,8 +302,6 @@ export default async function ModulePage({
       return renderOfficialDataQualityDashboard(actor, searchParams, trace);
     }
 
-    const { DataQualityAnaliaDashboard } =
-      await import("@/components/data-quality-analia-dashboard");
     return <DataQualityAnaliaDashboard />;
   }
 
@@ -324,8 +317,6 @@ export default async function ModulePage({
   }
 
   if (module === "configuracion") {
-    const { AccountProfileDashboard } =
-      await import("@/components/account-profile-dashboard");
     return <AccountProfileDashboard />;
   }
 
@@ -334,7 +325,6 @@ export default async function ModulePage({
       module as (typeof operationsModuleSlugs)[number],
     )
   ) {
-    const { OperationsModule } = await import("@/components/operations-modules");
     return <OperationsModule module={module} />;
   }
 
@@ -343,8 +333,6 @@ export default async function ModulePage({
       return renderOfficialDataModule("overview", actor, searchParams, trace);
     }
 
-    const { ExecutiveOperationDashboard } =
-      await import("@/components/executive-operation-dashboard");
     return <ExecutiveOperationDashboard />;
   }
 
@@ -360,8 +348,6 @@ export default async function ModulePage({
   }
 
   if (moduleConfigs[module]) {
-    const { BusinessModuleDashboard } =
-      await import("@/components/business-module-dashboard");
     return (
       <BusinessModuleDashboard
         allowDemoRoleSwitch={actor.allowDemoRoleSwitch}

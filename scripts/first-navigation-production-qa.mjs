@@ -21,22 +21,18 @@ const routes = {
   form: {
     marker: "new-closure",
     pathname: "/protected/plantillas",
-    traceRoute: "plantillas",
   },
   history: {
     marker: "closures",
     pathname: "/protected/cierres",
-    traceRoute: "history",
   },
   results: {
     marker: "results",
     pathname: "/protected/resultados",
-    traceRoute: "results",
   },
   targets: {
     marker: "official-targets",
     pathname: "/protected/metas",
-    traceRoute: "metas",
   },
 };
 
@@ -279,7 +275,7 @@ async function navigate(page, routeName, scenario, hoverMs) {
       );
     const parsedTraces = traceValues.map((value) => JSON.parse(value));
     const serverTrace = parsedTraces.findLast(
-      (candidate) => candidate.route === route.traceRoute,
+      (candidate) => candidate.route === routeName,
     ) ?? null;
     const usableControl = await verifyUsability(page, routeName);
     const usableMs = Math.round(Date.now() - clickedAt);
@@ -299,7 +295,6 @@ async function navigate(page, routeName, scenario, hoverMs) {
       serverTrace,
       traceMarkerCount: parsedTraces.length,
       traceQueryPresent: current.searchParams.has("qaTrace"),
-      traceRoute: route.traceRoute,
       targetRequests,
       usableControl,
       usableMs,
@@ -409,10 +404,6 @@ async function createAuthenticatedPage({ trace }) {
   await page.goto(`${baseUrl}${seedPath(traceRequestId)}`, {
     waitUntil: "domcontentloaded",
   });
-  // The seed shell must finish its own JavaScript before the click window.
-  // saveData remains true here, so its normal delayed prefetch cannot warm a
-  // target route while this settles.
-  await page.waitForLoadState("networkidle", { timeout: navigationTimeoutMs });
   await firstVisibleLink(page, routes.results.pathname);
   return { context, loginMs, page };
 }
