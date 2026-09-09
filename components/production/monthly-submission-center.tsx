@@ -1018,7 +1018,7 @@ export function MonthlySubmissionCenter({
 
   if (!selectedAssignment) {
     return (
-      <Card>
+      <Card data-route-content-ready="new-closure">
         <CardHeader><CardTitle>Formulario mensual pendiente de estructura</CardTitle><CardDescription>Antes de capturar cierres debe existir al menos un país, empresa, sucursal activa y línea de negocio dentro de tu alcance.</CardDescription></CardHeader>
       </Card>
     );
@@ -1028,7 +1028,7 @@ export function MonthlySubmissionCenter({
   const templateLine = monthlyTemplateLine(formLine);
 
   return (
-    <div className="grid gap-5">
+    <div className="grid gap-5" data-route-content-ready="new-closure">
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">

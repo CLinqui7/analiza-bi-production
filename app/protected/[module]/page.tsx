@@ -279,14 +279,12 @@ export default async function ModulePage({
     const resolvedSearchParams = searchParams ? await searchParams : {};
 
     return (
-      <div data-route-content-ready="new-closure">
-        <MonthlyClosureRouter
-          actor={actor}
-          line={resolvedSearchParams.line}
-          mode="new-closure"
-          trace={trace}
-        />
-      </div>
+      <MonthlyClosureRouter
+        actor={actor}
+        line={resolvedSearchParams.line}
+        mode="new-closure"
+        trace={trace}
+      />
     );
   }
 

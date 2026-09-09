@@ -94,12 +94,21 @@ async function verifyPeriodControl(page) {
 
 async function verifyUsability(page, routeName) {
   if (routeName === "form") {
-    const editable = page.locator('input[id^="monthly-"]:not([disabled])').first();
-    await editable.waitFor({ state: "visible", timeout: navigationTimeoutMs });
+    const formSteps = page.getByTestId("monthly-form-steps").getByRole("button");
+    const stepCount = await formSteps.count();
+    let editable = page.locator('input[id^="monthly-"]:not([disabled])').first();
+    for (let index = 0; index < stepCount; index += 1) {
+      if (await editable.isVisible()) break;
+      await formSteps.nth(index).click();
+      await page.waitForTimeout(50);
+      editable = page.locator('input[id^="monthly-"]:not([disabled])').first();
+    }
+    if (!(await editable.isVisible())) {
+      throw new Error(`FORM_FIELD_NOT_RENDERED:steps=${stepCount}`);
+    }
     const originalValue = await editable.inputValue();
-    const testValue = editable
-      ? "0"
-      : "";
+    const inputType = await editable.getAttribute("type");
+    const testValue = inputType === "date" ? expectedPeriod.from : inputType === "month" ? "2026-07" : "0";
     await editable.fill(testValue);
     assert.equal(await editable.inputValue(), testValue, "FORM_FIELD_NOT_EDITABLE");
     await editable.fill(originalValue);
@@ -342,10 +351,21 @@ async function createAuthenticatedPage({ trace }) {
   const page = await context.newPage();
   const loginStartedAt = Date.now();
   await page.goto(`${baseUrl}/auth/login`, { waitUntil: "domcontentloaded" });
+  await page.waitForLoadState("networkidle", { timeout: navigationTimeoutMs });
   await page.locator("#email").fill(email);
   await page.locator("#password").fill(password);
   await page.locator('button[type="submit"]').click();
-  await page.waitForURL("**/protected/**", { timeout: navigationTimeoutMs });
+  try {
+    await page.waitForURL("**/protected/**", {
+      timeout: navigationTimeoutMs,
+      waitUntil: "commit",
+    });
+  } catch {
+    const loginError = await page
+      .locator("form div.border-red-200 span")
+      .allTextContents();
+    throw new Error(`QA_LOGIN_FAILED:${loginError.join(" ") || "no_message"}`);
+  }
   const loginMs = Math.round(Date.now() - loginStartedAt);
   await page.goto(`${baseUrl}${seedPath}`, { waitUntil: "domcontentloaded" });
   await firstVisibleLink(page, routes.results.pathname);
