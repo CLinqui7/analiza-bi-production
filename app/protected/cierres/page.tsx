@@ -3,6 +3,10 @@ import { connection } from "next/server";
 
 import { MonthlyClosureRouter } from "@/components/monthly-closure-router";
 import { requireProtectedPath } from "@/lib/server/authorization";
+import {
+  getNavigationPerformanceTrace,
+  traceNavigationStage,
+} from "@/lib/server/navigation-performance-trace";
 
 type ClosuresPageProps = {
   searchParams?: Promise<{
@@ -25,7 +29,10 @@ async function ClosuresGate({
   await connection();
 
   const params = searchParams ? await searchParams : {};
-  const actor = await requireProtectedPath("/protected/cierres");
+  const trace = await getNavigationPerformanceTrace("history");
+  const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
+    requireProtectedPath("/protected/cierres"),
+  );
 
   return (
     <div data-route-content-ready="closures">
@@ -45,6 +52,7 @@ async function ClosuresGate({
         }}
         line={params.line}
         mode="history"
+        trace={trace}
       />
     </div>
   );

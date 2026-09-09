@@ -1,5 +1,9 @@
 import { getBranchBiSnapshot } from "@/lib/v7/server/branch-bi-snapshot";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  traceNavigationStage,
+  type NavigationPerformanceTrace,
+} from "@/lib/server/navigation-performance-trace";
 
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { getDefaultPeriod } from "@/lib/tenant/demo-context";
@@ -225,15 +229,22 @@ function withDefaultPeriod(
 export async function getOfficialExecutiveSnapshot(
   actor: AuthorizationActor,
   filter: OfficialDashboardFilter = {},
+  trace?: NavigationPerformanceTrace | null,
 ): Promise<OfficialExecutiveSnapshot> {
   // The protected header displays this same default period before a user
   // applies filters. Keeping it in the server filter prevents an unfiltered
   // snapshot (for example August) from being labeled as the header month
   // (for example July).
   const effectiveFilter = withDefaultPeriod(filter);
-  const branchSnapshot = await getBranchBiSnapshot(actor, effectiveFilter, {
-    mode: "summary",
-  });
+  const branchSnapshot = await traceNavigationStage(
+    trace,
+    "official_branch_snapshot",
+    () =>
+      getBranchBiSnapshot(actor, effectiveFilter, {
+        mode: "summary",
+        trace,
+      }),
+  );
   const scopedRecords = branchSnapshot.records.filter(
     (record) =>
       (isWildcard(effectiveFilter.countryId) ||
@@ -261,14 +272,18 @@ export async function getOfficialExecutiveSnapshot(
   const admin = getSupabaseAdminClient();
   const targetResult =
     admin && scopedRecords.length > 0
-      ? await admin
-          .from("kpi_targets")
-          .select("*")
-          .eq("organization_id", actor.scope.organizationId)
-          .in(
-            "branch_id",
-            Array.from(new Set(scopedRecords.map((record) => record.branchId))),
-          )
+      ? await traceNavigationStage(trace, "official_targets", () =>
+          admin
+            .from("kpi_targets")
+            .select("*")
+            .eq("organization_id", actor.scope.organizationId)
+            .in(
+              "branch_id",
+              Array.from(
+                new Set(scopedRecords.map((record) => record.branchId)),
+              ),
+            ),
+        )
       : { data: [] as TargetRow[] };
   const targets = ((targetResult.data ?? []) as TargetRow[]).filter((target) =>
     isApprovedTarget(target, effectiveFilter),

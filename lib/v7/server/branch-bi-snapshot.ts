@@ -4,6 +4,10 @@ import { cache } from "react";
 
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import {
+  traceNavigationStage,
+  type NavigationPerformanceTrace,
+} from "@/lib/server/navigation-performance-trace";
 import { resolveV7ActorFromCurrent } from "@/lib/v7/server/api-auth";
 import {
   actorCanSee,
@@ -89,6 +93,7 @@ export type BranchBiSnapshot = {
  */
 export type BranchBiSnapshotLoadOptions = {
   mode?: "history" | "summary";
+  trace?: NavigationPerformanceTrace | null;
 };
 
 export type BranchBiHistoryEntry = {
@@ -227,6 +232,7 @@ async function getBranchBiSnapshotUncached(
   filter: BranchBiFilter = {},
   load: BranchBiSnapshotLoadOptions = {},
 ): Promise<BranchBiSnapshot> {
+  const trace = load.trace;
   const admin = getSupabaseAdminClient();
   const generatedAt = new Date().toISOString();
   const sourceTables = [
@@ -251,8 +257,12 @@ async function getBranchBiSnapshotUncached(
     };
   }
 
-  const v7Actor = await resolveV7ActorFromCurrent(actor);
-  const contextPromise = getTenantContextOptions(v7Actor, false);
+  const v7Actor = await traceNavigationStage(trace, "actor_grants", () =>
+    resolveV7ActorFromCurrent(actor, trace),
+  );
+  const contextPromise = traceNavigationStage(trace, "context_catalogs", () =>
+    getTenantContextOptions(v7Actor, false, trace),
+  );
   const concreteBranchIds = concreteBranchGrantIds(v7Actor);
   const contextBeforeVersions = concreteBranchIds ? null : await contextPromise;
   const branchIdsForVersionQuery =
@@ -301,7 +311,9 @@ async function getBranchBiSnapshotUncached(
   const versionsPromise =
     load.mode === "history"
       ? Promise.resolve({ data: [] as ClosingVersionRow[], error: null })
-      : versionsQuery;
+      : traceNavigationStage(trace, "published_versions", () =>
+          Promise.resolve(versionsQuery),
+        );
   const [context, versionsResult] = await Promise.all([
     contextPromise,
     versionsPromise,
@@ -336,24 +348,28 @@ async function getBranchBiSnapshotUncached(
           { data: [] as ClosingKpiRow[], error: null },
           { data: [] as InsightRow[], error: null },
         ]
-      : await Promise.all([
+        : await Promise.all([
           versionIds.length > 0
-            ? admin
-                .from("closing_kpi_results")
-                .select(
-                  "closing_version_id,kpi_code,kpi_name,category,value,unit,data_status",
-                )
-                .in("closing_version_id", versionIds)
-                .eq("is_demo", false)
+            ? traceNavigationStage(trace, "kpi_results", () =>
+                admin
+                  .from("closing_kpi_results")
+                  .select(
+                    "closing_version_id,kpi_code,kpi_name,category,value,unit,data_status",
+                  )
+                  .in("closing_version_id", versionIds)
+                  .eq("is_demo", false),
+              )
             : Promise.resolve({ data: [] as ClosingKpiRow[] }),
-          admin
-            .from("insights")
-            .select("branch_id,title,summary,severity,recommended_action")
-            .eq("organization_id", actor.scope.organizationId)
-            .in("branch_id", visibleBranchIds)
-            .eq("is_demo", false)
-            .order("created_at", { ascending: false })
-            .limit(20),
+          traceNavigationStage(trace, "insights", () =>
+            admin
+              .from("insights")
+              .select("branch_id,title,summary,severity,recommended_action")
+              .eq("organization_id", actor.scope.organizationId)
+              .in("branch_id", visibleBranchIds)
+              .eq("is_demo", false)
+              .order("created_at", { ascending: false })
+              .limit(20),
+          ),
         ]);
   const kpis = (kpisResult.data ?? []) as ClosingKpiRow[];
   const areasById = new Map(
@@ -409,7 +425,11 @@ async function getBranchBiSnapshotUncached(
       );
     if (filter.periodEnd)
       submissionsQuery = submissionsQuery.lte("period_start", filter.periodEnd);
-    const submissionsResult = await submissionsQuery;
+    const submissionsResult = await traceNavigationStage(
+      trace,
+      "history_submissions",
+      () => Promise.resolve(submissionsQuery),
+    );
     const manualSubmissions = (
       (submissionsResult.data ?? []) as ManualSubmissionRow[]
     ).filter((submission) => {
@@ -443,17 +463,19 @@ async function getBranchBiSnapshotUncached(
     });
     const historyVersionsResult =
       manualSubmissions.length > 0
-        ? await admin
-            .from("manual_monthly_submission_versions")
-            .select(
-              "id,submission_id,version_number,status,validation_summary,created_at,published_at,submitted_by",
-            )
-            .in(
-              "submission_id",
-              manualSubmissions.map((submission) => submission.id),
-            )
-            .order("created_at", { ascending: false })
-            .limit(100)
+        ? await traceNavigationStage(trace, "history_versions", () =>
+            admin
+              .from("manual_monthly_submission_versions")
+              .select(
+                "id,submission_id,version_number,status,validation_summary,created_at,published_at,submitted_by",
+              )
+              .in(
+                "submission_id",
+                manualSubmissions.map((submission) => submission.id),
+              )
+              .order("created_at", { ascending: false })
+              .limit(100),
+          )
         : { data: [] as ManualVersionRow[], error: null };
     const historyVersions = (historyVersionsResult.data ??
       []) as ManualVersionRow[];
@@ -467,21 +489,25 @@ async function getBranchBiSnapshotUncached(
     const [historyProfilesResult, historyAttachmentsResult] = await Promise.all(
       [
         historyAuthorIds.length > 0
-          ? admin
-              .from("profiles")
-              .select("id,display_name")
-              .in("id", historyAuthorIds)
+          ? traceNavigationStage(trace, "history_author_profiles", () =>
+              admin
+                .from("profiles")
+                .select("id,display_name")
+                .in("id", historyAuthorIds),
+            )
           : Promise.resolve({
               data: [] as Array<{ id: string; display_name: string | null }>,
             }),
         historyVersions.length > 0
-          ? admin
-              .from("manual_monthly_submission_attachments")
-              .select("submission_version_id")
-              .in(
-                "submission_version_id",
-                historyVersions.map((version) => version.id),
-              )
+          ? traceNavigationStage(trace, "history_attachments", () =>
+              admin
+                .from("manual_monthly_submission_attachments")
+                .select("submission_version_id")
+                .in(
+                  "submission_version_id",
+                  historyVersions.map((version) => version.id),
+                )
+            )
           : Promise.resolve({ data: [] as AttachmentCountRow[] }),
       ],
     );

@@ -3,6 +3,10 @@ import { connection } from "next/server";
 
 import { MonthlyClosureRouter } from "@/components/monthly-closure-router";
 import { requireProtectedPath } from "@/lib/server/authorization";
+import {
+  getNavigationPerformanceTrace,
+  traceNavigationStage,
+} from "@/lib/server/navigation-performance-trace";
 
 type MyBranchPageProps = {
   searchParams?: Promise<{
@@ -25,7 +29,10 @@ async function MyBranchGate({
   await connection();
 
   const params = searchParams ? await searchParams : {};
-  const actor = await requireProtectedPath("/protected/mi-sucursal");
+  const trace = await getNavigationPerformanceTrace("my_branch");
+  const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
+    requireProtectedPath("/protected/mi-sucursal"),
+  );
 
   return (
     <div data-route-content-ready="my-branch">
@@ -45,6 +52,7 @@ async function MyBranchGate({
         }}
         line={params.line}
         mode="branch-home"
+        trace={trace}
       />
     </div>
   );

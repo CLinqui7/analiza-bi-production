@@ -6,6 +6,11 @@ import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
 import { getBusinessLineForCompany } from "@/lib/tenant/demo-context";
+import {
+  traceNavigationReady,
+  traceNavigationStage,
+  type NavigationPerformanceTrace,
+} from "@/lib/server/navigation-performance-trace";
 import { resolveV7ActorFromCurrent } from "@/lib/v7/server/api-auth";
 import { getTenantContextOptions } from "@/lib/v7/server/tenant-context";
 import type { BranchBiFilter } from "@/lib/v7/server/branch-bi-snapshot";
@@ -26,6 +31,7 @@ type MonthlyClosureRouterProps = {
   filter?: BranchBiFilter;
   line?: string | string[];
   mode: DashboardMode;
+  trace?: NavigationPerformanceTrace | null;
 };
 
 function requestedLine(value: string | string[] | undefined) {
@@ -91,7 +97,9 @@ export async function MonthlyClosureRouter({
   filter,
   line,
   mode,
+  trace,
 }: MonthlyClosureRouterProps) {
+  const startedAt = performance.now();
   const selectedLine = requestedLine(line) ?? scopedCompanyUnit(actor);
 
   if (!isDemoRuntimeEnvironment()) {
@@ -103,7 +111,7 @@ export async function MonthlyClosureRouter({
           : mode === "results"
             ? "results"
             : "results";
-      return <BranchBiServerDashboard actor={actor} filter={filter} mode={dashboardMode} />;
+      return <BranchBiServerDashboard actor={actor} filter={filter} mode={dashboardMode} trace={trace} />;
     }
 
     if (actor.roleKey !== "gerente_sucursal") {
@@ -117,8 +125,12 @@ export async function MonthlyClosureRouter({
       );
     }
 
-    const v7Actor = await resolveV7ActorFromCurrent(actor);
-    const options = await getTenantContextOptions(v7Actor);
+    const v7Actor = await traceNavigationStage(trace, "actor_grants", () =>
+      resolveV7ActorFromCurrent(actor, trace),
+    );
+    const options = await traceNavigationStage(trace, "form_catalogs", () =>
+      getTenantContextOptions(v7Actor, true, trace),
+    );
     if (options.monthlyAssignments.length === 0) {
       return (
         <section className="flex w-full flex-col gap-4 px-4 py-6 lg:px-6">
@@ -132,6 +144,7 @@ export async function MonthlyClosureRouter({
       );
     }
 
+    traceNavigationReady(trace, startedAt);
     return (
       <MonthlySubmissionCenter
         options={options}

@@ -4,6 +4,10 @@ import { NextResponse } from "next/server";
 import { cache } from "react";
 
 import { getCurrentAuthorizationActor } from "@/lib/server/authorization";
+import {
+  traceNavigationStage,
+  type NavigationPerformanceTrace,
+} from "@/lib/server/navigation-performance-trace";
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import { canPerformAction } from "@/lib/v7/security/authorization-policy";
 import type { ActionKey, Actor } from "@/lib/v7/security/types";
@@ -26,6 +30,7 @@ export function toV7Actor(
 
 async function resolveV7ActorFromCurrentUncached(
   actor: NonNullable<Awaited<ReturnType<typeof getCurrentAuthorizationActor>>>,
+  trace?: NavigationPerformanceTrace | null,
 ): Promise<Actor> {
   const base = toV7Actor(actor);
 
@@ -39,11 +44,16 @@ async function resolveV7ActorFromCurrentUncached(
     return base;
   }
 
-  const { data: roleData } = await admin
-    .from("roles")
-    .select("id")
-    .eq("key", actor.roleKey)
-    .maybeSingle();
+  const { data: roleData } = await traceNavigationStage(
+    trace,
+    "grant_role_catalog",
+    () =>
+      admin
+        .from("roles")
+        .select("id")
+        .eq("key", actor.roleKey)
+        .maybeSingle(),
+  );
 
   const role = roleData as { id: string } | null;
 
@@ -53,24 +63,28 @@ async function resolveV7ActorFromCurrentUncached(
 
   const [{ data: userRoleGrantData }, { data: managerAssignmentData }] =
     await Promise.all([
-      admin
-        .from("user_roles")
-        .select(
-          "country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code",
-        )
-        .eq("user_id", actor.userId)
-        .eq("organization_id", actor.scope.organizationId)
-        .eq("role_id", role.id)
-        .eq("status", "active"),
-      admin
-        .from("manager_assignments")
-        .select(
-          "country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code",
-        )
-        .eq("profile_id", actor.userId)
-        .eq("organization_id", actor.scope.organizationId)
-        .eq("role_id", role.id)
-        .eq("status", "active"),
+      traceNavigationStage(trace, "grant_user_roles", () =>
+        admin
+          .from("user_roles")
+          .select(
+            "country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code",
+          )
+          .eq("user_id", actor.userId)
+          .eq("organization_id", actor.scope.organizationId)
+          .eq("role_id", role.id)
+          .eq("status", "active"),
+      ),
+      traceNavigationStage(trace, "grant_manager_assignments", () =>
+        admin
+          .from("manager_assignments")
+          .select(
+            "country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code",
+          )
+          .eq("profile_id", actor.userId)
+          .eq("organization_id", actor.scope.organizationId)
+          .eq("role_id", role.id)
+          .eq("status", "active"),
+      ),
     ]);
 
   const grants = [

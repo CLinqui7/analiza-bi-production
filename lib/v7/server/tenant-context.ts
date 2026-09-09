@@ -9,6 +9,10 @@ import {
   demoCompanies,
   demoCountries,
 } from "@/lib/tenant/demo-context";
+import {
+  traceNavigationStage,
+  type NavigationPerformanceTrace,
+} from "@/lib/server/navigation-performance-trace";
 import { createAdminClient } from "@/lib/v7/server/admin-client";
 import { hasSupabaseAdminConfiguration } from "@/lib/v7/server/env";
 import { createClient } from "@/lib/supabase/server";
@@ -171,6 +175,7 @@ function reportingMonths(reference = new Date()) {
 async function getTenantContextOptionsUncached(
   actor: Actor,
   includeDirectoryProfiles = true,
+  trace?: NavigationPerformanceTrace | null,
 ): Promise<TenantContextOptions> {
   if (actor.isDemo) {
     return {
@@ -281,7 +286,8 @@ async function getTenantContextOptionsUncached(
     branchManagersResult,
     managerAssignmentsResult,
     rolesResult,
-  ] = await Promise.all([
+  ] = await traceNavigationStage(trace, "context_catalog_queries", () =>
+    Promise.all([
     (() => {
       let query = supabase
         .from("countries")
@@ -355,8 +361,9 @@ async function getTenantContextOptionsUncached(
         query = query.in("branch_id", branchGrantIds);
       return query;
     })(),
-    supabase.from("roles").select("id,key"),
-  ]);
+      supabase.from("roles").select("id,key"),
+    ]),
+  );
 
   const countries = (countriesResult.data ?? []) as CountryRow[];
   const companies = (companiesResult.data ?? []) as CompanyRow[];
@@ -453,10 +460,12 @@ async function getTenantContextOptionsUncached(
   // interactive directory and form paths retain it for names and email.
   const profilesResult =
     includeDirectoryProfiles && profileIds.length > 0
-      ? await supabase
-          .from("profiles")
-          .select("id,display_name,email,status")
-          .in("id", profileIds)
+      ? await traceNavigationStage(trace, "context_directory_profiles", () =>
+          supabase
+            .from("profiles")
+            .select("id,display_name,email,status")
+            .in("id", profileIds),
+        )
       : { data: [] };
   const profiles = (profilesResult.data ?? []) as ProfileRow[];
   const profileById = new Map(profiles.map((item) => [item.id, item]));

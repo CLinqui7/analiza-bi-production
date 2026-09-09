@@ -3,6 +3,10 @@ import { connection } from "next/server";
 
 import { MonthlyClosureRouter } from "@/components/monthly-closure-router";
 import { requireProtectedPath } from "@/lib/server/authorization";
+import {
+  getNavigationPerformanceTrace,
+  traceNavigationStage,
+} from "@/lib/server/navigation-performance-trace";
 
 type ResultsPageProps = {
   searchParams?: Promise<{
@@ -25,7 +29,10 @@ async function ResultsGate({
   await connection();
 
   const params = searchParams ? await searchParams : {};
-  const actor = await requireProtectedPath("/protected/resultados");
+  const trace = await getNavigationPerformanceTrace("results");
+  const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
+    requireProtectedPath("/protected/resultados"),
+  );
 
   return (
     <div data-route-content-ready="results">
@@ -45,6 +52,7 @@ async function ResultsGate({
         }}
         line={params.line}
         mode="results"
+        trace={trace}
       />
     </div>
   );

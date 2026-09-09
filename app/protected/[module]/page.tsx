@@ -25,6 +25,12 @@ import { moduleConfigs } from "@/lib/analytics/demo-business-modules";
 import { navigationItems } from "@/lib/navigation";
 import { requireProtectedPath } from "@/lib/server/authorization";
 import { getOfficialExecutiveSnapshot } from "@/lib/server/official-bi";
+import {
+  getNavigationPerformanceTrace,
+  traceNavigationReady,
+  traceNavigationStage,
+  type NavigationPerformanceTrace,
+} from "@/lib/server/navigation-performance-trace";
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { isDemoRuntimeEnvironment } from "@/lib/security/environment";
 
@@ -70,6 +76,7 @@ type OfficialDataModuleProps = {
   actor: AuthorizationActor;
   mode: OfficialDataModuleMode;
   searchParams: ModulePageProps["searchParams"];
+  trace?: NavigationPerformanceTrace | null;
 };
 
 function officialFilterFromParams(
@@ -91,14 +98,19 @@ async function OfficialDataModule({
   actor,
   mode,
   searchParams,
+  trace,
 }: OfficialDataModuleProps) {
+  const startedAt = performance.now();
   const params = searchParams ? await searchParams : {};
-  const snapshot = await getOfficialExecutiveSnapshot(
-    actor,
-    officialFilterFromParams(params),
+  const snapshot = await traceNavigationStage(trace, "official_snapshot", () =>
+    getOfficialExecutiveSnapshot(actor, officialFilterFromParams(params), trace),
   );
-  const { OfficialExecutiveDataDashboard } =
-    await import("@/components/official-executive-data-dashboard");
+  const { OfficialExecutiveDataDashboard } = await traceNavigationStage(
+    trace,
+    "dashboard_module",
+    () => import("@/components/official-executive-data-dashboard"),
+  );
+  traceNavigationReady(trace, startedAt);
 
   return (
     <div data-route-content-ready={`official-${mode}`}>
@@ -111,6 +123,7 @@ function renderOfficialDataModule(
   mode: "finances" | "insights" | "overview" | "targets",
   actor: AuthorizationActor,
   searchParams: ModulePageProps["searchParams"],
+  trace?: NavigationPerformanceTrace | null,
 ) {
   const labelByMode: Record<OfficialDataModuleMode, string> = {
     finances: "salud financiera oficial",
@@ -125,6 +138,7 @@ function renderOfficialDataModule(
         actor={actor}
         mode={mode}
         searchParams={searchParams}
+        trace={trace}
       />
     </Suspense>
   );
@@ -133,14 +147,19 @@ function renderOfficialDataModule(
 async function OfficialDataQualityModule({
   actor,
   searchParams,
+  trace,
 }: Omit<OfficialDataModuleProps, "mode">) {
+  const startedAt = performance.now();
   const params = searchParams ? await searchParams : {};
-  const snapshot = await getOfficialExecutiveSnapshot(
-    actor,
-    officialFilterFromParams(params),
+  const snapshot = await traceNavigationStage(trace, "official_snapshot", () =>
+    getOfficialExecutiveSnapshot(actor, officialFilterFromParams(params), trace),
   );
-  const { OfficialDataQualityDashboard } =
-    await import("@/components/official-data-quality-dashboard");
+  const { OfficialDataQualityDashboard } = await traceNavigationStage(
+    trace,
+    "dashboard_module",
+    () => import("@/components/official-data-quality-dashboard"),
+  );
+  traceNavigationReady(trace, startedAt);
 
   return (
     <div data-route-content-ready="official-data-quality">
@@ -152,12 +171,17 @@ async function OfficialDataQualityModule({
 function renderOfficialDataQualityDashboard(
   actor: AuthorizationActor,
   searchParams: ModulePageProps["searchParams"],
+  trace?: NavigationPerformanceTrace | null,
 ) {
   return (
     <Suspense
       fallback={<ProtectedRouteLoading label="calidad de datos oficial" />}
     >
-      <OfficialDataQualityModule actor={actor} searchParams={searchParams} />
+      <OfficialDataQualityModule
+        actor={actor}
+        searchParams={searchParams}
+        trace={trace}
+      />
     </Suspense>
   );
 }
@@ -177,7 +201,10 @@ export default async function ModulePage({
     notFound();
   }
 
-  const actor = await requireProtectedPath(item.href);
+  const trace = await getNavigationPerformanceTrace(module);
+  const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
+    requireProtectedPath(item.href),
+  );
 
   const Icon = item.icon;
 
@@ -231,7 +258,7 @@ export default async function ModulePage({
 
   if (module === "insights") {
     if (!isDemoRuntimeEnvironment()) {
-      return renderOfficialDataModule("insights", actor, searchParams);
+      return renderOfficialDataModule("insights", actor, searchParams, trace);
     }
 
     const { InsightsIntelligenceDashboard } =
@@ -257,6 +284,7 @@ export default async function ModulePage({
           actor={actor}
           line={resolvedSearchParams.line}
           mode="new-closure"
+          trace={trace}
         />
       </div>
     );
@@ -268,7 +296,7 @@ export default async function ModulePage({
 
   if (module === "calidad-datos") {
     if (!isDemoRuntimeEnvironment()) {
-      return renderOfficialDataQualityDashboard(actor, searchParams);
+      return renderOfficialDataQualityDashboard(actor, searchParams, trace);
     }
 
     return <DataQualityAnaliaDashboard />;
@@ -276,7 +304,7 @@ export default async function ModulePage({
 
   if (module === "metas") {
     if (!isDemoRuntimeEnvironment()) {
-      return renderOfficialDataModule("targets", actor, searchParams);
+      return renderOfficialDataModule("targets", actor, searchParams, trace);
     }
 
     const { GoalsAdvancesDashboard } =
@@ -299,7 +327,7 @@ export default async function ModulePage({
 
   if (module === "operacion") {
     if (!isDemoRuntimeEnvironment()) {
-      return renderOfficialDataModule("overview", actor, searchParams);
+      return renderOfficialDataModule("overview", actor, searchParams, trace);
     }
 
     return <ExecutiveOperationDashboard />;
@@ -307,7 +335,7 @@ export default async function ModulePage({
 
   if (module === "finanzas") {
     if (!isDemoRuntimeEnvironment()) {
-      return renderOfficialDataModule("finances", actor, searchParams);
+      return renderOfficialDataModule("finances", actor, searchParams, trace);
     }
 
     const { FinancialHealthDashboard } =
