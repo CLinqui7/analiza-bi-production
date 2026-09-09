@@ -8,7 +8,14 @@ import { chromium } from "playwright";
 const defaultBaseUrl = "https://web-clinqui7s-projects.vercel.app";
 const navigationTimeoutMs = 20_000;
 const expectedPeriod = { from: "2026-07-01", to: "2026-07-31" };
-const seedPath = `/protected/mi-sucursal?from=${expectedPeriod.from}&to=${expectedPeriod.to}`;
+function seedPath(traceRequestId) {
+  const searchParams = new URLSearchParams({
+    from: expectedPeriod.from,
+    to: expectedPeriod.to,
+  });
+  if (traceRequestId) searchParams.set("_qaTrace", traceRequestId);
+  return `/protected/mi-sucursal?${searchParams.toString()}`;
+}
 
 const routes = {
   form: {
@@ -350,11 +357,6 @@ async function createAuthenticatedPage({ trace }) {
     }).observe({ entryTypes: ["longtask"] });
   });
   const page = await context.newPage();
-  if (traceRequestId) {
-    await page.setExtraHTTPHeaders({
-      "x-analiza-navigation-trace": traceRequestId,
-    });
-  }
   const loginStartedAt = Date.now();
   await page.goto(`${baseUrl}/auth/login`, { waitUntil: "domcontentloaded" });
   await page.waitForLoadState("networkidle", { timeout: navigationTimeoutMs });
@@ -373,7 +375,9 @@ async function createAuthenticatedPage({ trace }) {
     throw new Error(`QA_LOGIN_FAILED:${loginError.join(" ") || "no_message"}`);
   }
   const loginMs = Math.round(Date.now() - loginStartedAt);
-  await page.goto(`${baseUrl}${seedPath}`, { waitUntil: "domcontentloaded" });
+  await page.goto(`${baseUrl}${seedPath(traceRequestId)}`, {
+    waitUntil: "domcontentloaded",
+  });
   await firstVisibleLink(page, routes.results.pathname);
   return { context, loginMs, page };
 }
@@ -495,7 +499,7 @@ try {
         briefHoverMs: 175,
         freshContextPerFirstVisit: true,
         preClickRequestsRecorded: true,
-        traceHeader: "opaque per-request QA identifier",
+        traceQuery: "opaque per-request QA identifier",
       },
     }),
   );

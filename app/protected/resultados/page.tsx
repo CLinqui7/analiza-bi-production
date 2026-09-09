@@ -10,6 +10,7 @@ import {
 
 type ResultsPageProps = {
   searchParams?: Promise<{
+    _qaTrace?: string;
     area?: string;
     branch?: string;
     company?: string;
@@ -29,7 +30,7 @@ async function ResultsGate({
   await connection();
 
   const params = searchParams ? await searchParams : {};
-  const trace = await getNavigationPerformanceTrace("results");
+  const trace = await getNavigationPerformanceTrace("results", params._qaTrace);
   const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
     requireProtectedPath("/protected/resultados"),
   );

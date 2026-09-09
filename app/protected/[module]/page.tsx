@@ -40,6 +40,7 @@ type ModulePageProps = {
     module: string;
   }>;
   searchParams?: Promise<{
+    _qaTrace?: string;
     area?: string;
     branch?: string;
     company?: string;
@@ -204,7 +205,8 @@ export default async function ModulePage({
     notFound();
   }
 
-  const trace = await getNavigationPerformanceTrace(module);
+  const traceParams = searchParams ? await searchParams : {};
+  const trace = await getNavigationPerformanceTrace(module, traceParams._qaTrace);
   const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
     requireProtectedPath(item.href),
   );

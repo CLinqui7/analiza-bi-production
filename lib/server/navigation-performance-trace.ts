@@ -1,9 +1,8 @@
 import "server-only";
 
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 
 const traceCookieName = "analiza-navigation-trace";
-const traceHeaderName = "x-analiza-navigation-trace";
 
 export type NavigationPerformanceTrace = {
   requestId: string;
@@ -22,11 +21,10 @@ export type NavigationPerformanceStage = {
  */
 export async function getNavigationPerformanceTrace(
   route: string,
+  queryRequestId?: string,
 ): Promise<NavigationPerformanceTrace | null> {
-  const [cookieStore, requestHeaders] = await Promise.all([cookies(), headers()]);
-  const requestId =
-    requestHeaders.get(traceHeaderName) ??
-    cookieStore.get(traceCookieName)?.value;
+  const cookieStore = await cookies();
+  const requestId = queryRequestId ?? cookieStore.get(traceCookieName)?.value;
   return requestId && /^[a-f0-9]{12,32}$/.test(requestId)
     ? { requestId, route, stages: [] }
     : null;

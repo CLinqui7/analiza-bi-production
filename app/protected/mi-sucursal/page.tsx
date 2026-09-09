@@ -10,6 +10,7 @@ import {
 
 type MyBranchPageProps = {
   searchParams?: Promise<{
+    _qaTrace?: string;
     area?: string;
     branch?: string;
     company?: string;
@@ -29,7 +30,7 @@ async function MyBranchGate({
   await connection();
 
   const params = searchParams ? await searchParams : {};
-  const trace = await getNavigationPerformanceTrace("my_branch");
+  const trace = await getNavigationPerformanceTrace("my_branch", params._qaTrace);
   const actor = await traceNavigationStage(trace, "page_authorization_cache", () =>
     requireProtectedPath("/protected/mi-sucursal"),
   );
