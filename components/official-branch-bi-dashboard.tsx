@@ -78,6 +78,12 @@ function status(record: BranchBiRecord) {
   return { className: "bg-emerald-100 text-emerald-800", label: "Publicado" };
 }
 
+function unitLabel(
+  record: Pick<BranchBiRecord, "branchName" | "businessLineName">,
+) {
+  return `${record.branchName} · ${record.businessLineName ?? "Sin línea"}`;
+}
+
 function titleFor(mode: DashboardMode, roleKey: RoleKey) {
   if (mode === "home") {
     return ["ceo", "gerente_operaciones"].includes(roleKey)
@@ -94,7 +100,8 @@ function titleFor(mode: DashboardMode, roleKey: RoleKey) {
 function TrendChart({ records }: { records: readonly BranchBiRecord[] }) {
   const lines = records
     .map((record) => ({
-      name: record.branchName,
+      id: record.recordId,
+      name: unitLabel(record),
       points: record.trend
         .map((point) => ({ label: point.period, value: metricValue(point.revenue ?? undefined) }))
         .filter((point): point is { label: string; value: number } => point.value !== null && Number.isFinite(point.value)),
@@ -122,11 +129,11 @@ function TrendChart({ records }: { records: readonly BranchBiRecord[] }) {
           const points = line.points
             .map((point, pointIndex) => `${40 + pointIndex * step},${180 - ((point.value - min) / span) * 140}`)
             .join(" ");
-          return <polyline fill="none" key={line.name} points={points} stroke={colors[index]} strokeWidth="3" />;
+          return <polyline fill="none" key={line.id} points={points} stroke={colors[index]} strokeWidth="3" />;
         })}
       </svg>
       <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-        {lines.map((line, index) => <span key={line.name}><span className="mr-1 inline-block size-2 rounded-full" style={{ backgroundColor: colors[index] }} />{line.name}</span>)}
+        {lines.map((line, index) => <span key={line.id}><span className="mr-1 inline-block size-2 rounded-full" style={{ backgroundColor: colors[index] }} />{line.name}</span>)}
       </div>
     </div>
   );
@@ -135,11 +142,12 @@ function TrendChart({ records }: { records: readonly BranchBiRecord[] }) {
 function Matrix({ records }: { records: readonly BranchBiRecord[] }) {
   const points = records
     .map((record) => ({
+      id: record.recordId,
       margin: metricValue(record.metrics.margin),
-      name: record.branchName,
+      name: unitLabel(record),
       revenue: metricValue(record.metrics.revenue),
     }))
-    .filter((point): point is { margin: number; name: string; revenue: number } => point.margin !== null && point.revenue !== null && Number.isFinite(point.margin) && Number.isFinite(point.revenue));
+    .filter((point): point is { id: string; margin: number; name: string; revenue: number } => point.margin !== null && point.revenue !== null && Number.isFinite(point.margin) && Number.isFinite(point.revenue));
   if (points.length === 0) {
     return <p className="text-sm text-muted-foreground">Sin pares reales de facturación y margen para graficar.</p>;
   }
@@ -158,7 +166,7 @@ function Matrix({ records }: { records: readonly BranchBiRecord[] }) {
       {points.map((point) => {
         const x = 50 + (point.revenue / maxRevenue) * 400;
         const y = 230 - ((point.margin - minMargin) / marginRange) * 180;
-        return <g key={point.name}><circle cx={x} cy={y} fill="#2878ff" r="8" /><title>{point.name}</title></g>;
+        return <g key={point.id}><circle cx={x} cy={y} fill="#2878ff" r="8" /><title>{point.name}</title></g>;
       })}
     </svg>
   );
@@ -211,6 +219,7 @@ export function OfficialBranchBiDashboard({
     return sort.direction === "asc" ? comparison : -comparison;
   }), [filtered, sort]);
   const selected = ranking.find((record) => record.recordId === selectedBranchId) ?? ranking[0] ?? null;
+  const visibleBranchCount = new Set(filtered.map((record) => record.branchId)).size;
   const publishedCount = filtered.filter((record) => record.hasPublishedClosing).length;
   const revenue = sumCurrency(filtered);
   const quality = average(filtered, (record) => record.dataQuality);
@@ -237,7 +246,7 @@ export function OfficialBranchBiDashboard({
             <div><h1 className="text-3xl font-semibold tracking-normal">{titleFor(mode, roleKey)}</h1><p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">Comparación, ranking, mapa operativo, matriz, calidad y tendencia construidos únicamente desde el alcance autorizado.</p></div>
           </div>
         </div>
-        <aside className="rounded-lg border bg-card p-4 text-sm leading-6"><div className="flex items-center gap-2 font-medium"><ShieldCheck className="size-4 text-primary" />Alcance verificado</div><p className="mt-2 text-muted-foreground">{filtered.length} sucursales visibles · {publishedCount} con cierre publicado</p><p className="mt-1 text-xs text-muted-foreground">Actualizado {new Intl.DateTimeFormat("es-SV", { dateStyle: "medium", timeStyle: "short" }).format(new Date(snapshot.generatedAt))}</p></aside>
+        <aside className="rounded-lg border bg-card p-4 text-sm leading-6"><div className="flex items-center gap-2 font-medium"><ShieldCheck className="size-4 text-primary" />Alcance verificado</div><p className="mt-2 text-muted-foreground">{visibleBranchCount} sucursales · {filtered.length} unidades sucursal + línea · {publishedCount} con cierre publicado</p><p className="mt-1 text-xs text-muted-foreground">Actualizado {new Intl.DateTimeFormat("es-SV", { dateStyle: "medium", timeStyle: "short" }).format(new Date(snapshot.generatedAt))}</p></aside>
       </header>
 
       {!snapshot.sourceAvailable ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">La fuente V7 no está disponible para esta sesión. No se muestran valores de respaldo.</div> : null}
@@ -275,31 +284,31 @@ export function OfficialBranchBiDashboard({
 
       <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         {[
-          ["Sucursales", String(filtered.length), "en el alcance actual"],
-          ["Cierres publicados", String(publishedCount), "periodo más reciente por sucursal"],
+          ["Unidades BI", String(filtered.length), "sucursal + línea en el alcance actual"],
+          ["Cierres publicados", String(publishedCount), "periodo más reciente por unidad BI"],
           ["Sin cierre", String(filtered.length - publishedCount), "no se reemplaza con cero"],
           ["Facturación", revenue === null ? "Sin dato" : new Intl.NumberFormat("en-US", { currency: "USD", maximumFractionDigits: 0, style: "currency" }).format(revenue), revenue === null ? "seleccione un país o publique un KPI" : "suma de KPIs calculables"],
           ["Unidad BI", "Sucursal + línea", "nunca se mezclan líneas de negocio"],
-          ["Resultado", "Comparativo por sucursal", "el propósito depende de la vista"],
+          ["Resultado", "Comparativo por sucursal + línea", "el propósito depende de la vista"],
           ["Calidad de datos", formatNumber(quality, "%"), "score registrado en cierres publicados"],
           ["Puntaje comparable", formatMetric(selected?.metrics.score), "solo cuando existe KPI oficial"],
         ].map(([label, value, note]) => <article className="rounded-lg border bg-card p-4" key={label}><div className="text-sm text-muted-foreground">{label}</div><div className="mt-2 text-2xl font-semibold tracking-normal">{value}</div><p className="mt-2 text-xs leading-5 text-muted-foreground">{note}</p></article>)}
       </section>
 
       <section className="rounded-lg border bg-card p-4" data-testid="bi-branches-ranking">
-        <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><BarChart3 className="size-4 text-primary" />Ranking integral de sucursales</div>
+        <div className="mb-4 flex items-center gap-2 text-sm font-semibold"><BarChart3 className="size-4 text-primary" />Ranking integral por sucursal y línea</div>
         <div className="overflow-x-auto"><table className="w-full min-w-[860px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr>{([ ["branch", "Sucursal"], ["score", "Puntaje"], ["revenue", "Facturación"], ["quality", "Calidad"] ] as Array<[SortKey, string]>).map(([key, label]) => <th className="py-2 pr-4" key={key}><button aria-label={`Ordenar por ${label}`} className="inline-flex items-center gap-1 font-medium hover:text-foreground" data-sort-direction={sort.key === key ? sort.direction : "none"} onClick={() => toggleSort(key)} type="button">{label}<ArrowUpDown className="size-3" /></button></th>)}<th className="py-2 pr-4 font-medium">Margen</th><th className="py-2 pr-4 font-medium">Estado</th><th className="py-2 font-medium">Gerente</th></tr></thead><tbody>{ranking.map((record) => { const state = status(record); return <tr className={cn("cursor-pointer border-b last:border-b-0 hover:bg-muted/40", selected?.recordId === record.recordId && "bg-primary/5")} key={record.recordId} onClick={() => setSelectedBranchId(record.recordId)}><td className="py-3 pr-4 font-medium">{record.branchName}<div className="text-xs font-normal text-muted-foreground">{record.businessLineName ?? "Sin línea"} · {record.operationalAreaName ?? "Sin área asignada"}</div></td><td className="py-3 pr-4">{formatMetric(record.metrics.score)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatNumber(record.dataQuality, "%")}</td><td className="py-3 pr-4">{formatMetric(record.metrics.margin)}</td><td className="py-3 pr-4"><Badge className={state.className}>{state.label}</Badge></td><td className="py-3">{record.branchManagerName ?? "Sin gerente asignado"}</td></tr>; })}</tbody></table></div>
         {ranking.length === 0 ? <p className="py-6 text-sm text-muted-foreground">No hay sucursales que coincidan con los filtros aplicados.</p> : null}
       </section>
 
-      {selected ? <section className="rounded-lg border bg-card p-4" data-testid="bi-drilldown"><div className="text-sm font-semibold">Detalle de sucursal</div><div className="mt-2 text-base font-medium">{selected.branchName}</div><p className="mt-1 text-sm text-muted-foreground">{selected.latestPeriod ? `Último cierre publicado: ${selected.latestPeriod}` : "Sin cierre publicado para esta sucursal."}</p></section> : null}
+      {selected ? <section className="rounded-lg border bg-card p-4" data-testid="bi-drilldown"><div className="text-sm font-semibold">Detalle de la unidad BI</div><div className="mt-2 text-base font-medium">{unitLabel(selected)}</div><p className="mt-1 text-sm text-muted-foreground">{selected.latestPeriod ? `Último cierre publicado: ${selected.latestPeriod}` : "Sin cierre publicado para esta unidad."}</p></section> : null}
 
       <div className="grid gap-4 xl:grid-cols-2">
-        <section className="rounded-lg border bg-card p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold"><MapPinned className="size-4 text-primary" />Mapa operativo por área</div><div className="grid gap-2 sm:grid-cols-2">{filtered.map((record) => { const state = status(record); return <button className={cn("rounded-lg border p-3 text-left transition-colors hover:border-primary", selected?.branchId === record.branchId && "border-primary bg-primary/5")} key={record.branchId} onClick={() => setSelectedBranchId(record.branchId)} type="button"><div className="font-medium">{record.branchName}</div><div className="mt-1 text-xs text-muted-foreground">{record.operationalAreaName ?? record.city ?? "Sin ubicación operacional"}</div><Badge className={cn("mt-3", state.className)}>{state.label}</Badge></button>; })}</div></section>
+        <section className="rounded-lg border bg-card p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold"><MapPinned className="size-4 text-primary" />Mapa operativo por área</div><div className="grid gap-2 sm:grid-cols-2">{filtered.map((record) => { const state = status(record); return <button className={cn("rounded-lg border p-3 text-left transition-colors hover:border-primary", selected?.recordId === record.recordId && "border-primary bg-primary/5")} data-record-id={record.recordId} key={record.recordId} onClick={() => setSelectedBranchId(record.recordId)} type="button"><div className="font-medium">{unitLabel(record)}</div><div className="mt-1 text-xs text-muted-foreground">{record.operationalAreaName ?? record.city ?? "Sin ubicación operacional"}</div><Badge className={cn("mt-3", state.className)}>{state.label}</Badge></button>; })}</div></section>
         <section className="rounded-lg border bg-card p-4"><div className="mb-3 text-sm font-semibold">Matriz rentabilidad versus operación</div><p className="mb-3 text-xs leading-5 text-muted-foreground">Cada punto requiere KPI oficial de facturación y margen.</p><Matrix records={filtered} /></section>
       </div>
 
-      <section className="rounded-lg border bg-card p-4"><div className="mb-4 text-sm font-semibold">Heatmap de KPIs publicados</div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr><th className="py-2 pr-4 font-medium">Sucursal</th><th className="py-2 pr-4 font-medium">Facturación</th><th className="py-2 pr-4 font-medium">Volumen</th><th className="py-2 pr-4 font-medium">Ocupación</th><th className="py-2 pr-4 font-medium">SLA/TAT</th><th className="py-2 font-medium">Calidad</th></tr></thead><tbody>{filtered.map((record) => <tr className="border-b last:border-b-0" key={record.branchId}><td className="py-3 pr-4 font-medium">{record.branchName}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.volume)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.occupancy)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.sla)}</td><td className="py-3">{formatNumber(record.dataQuality, "%")}</td></tr>)}</tbody></table></div></section>
+      <section className="rounded-lg border bg-card p-4"><div className="mb-4 text-sm font-semibold">Heatmap de KPIs publicados</div><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr><th className="py-2 pr-4 font-medium">Unidad BI</th><th className="py-2 pr-4 font-medium">Facturación</th><th className="py-2 pr-4 font-medium">Volumen</th><th className="py-2 pr-4 font-medium">Ocupación</th><th className="py-2 pr-4 font-medium">SLA/TAT</th><th className="py-2 font-medium">Calidad</th></tr></thead><tbody>{filtered.map((record) => <tr className="border-b last:border-b-0" key={record.recordId}><td className="py-3 pr-4 font-medium">{unitLabel(record)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.volume)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.occupancy)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.sla)}</td><td className="py-3">{formatNumber(record.dataQuality, "%")}</td></tr>)}</tbody></table></div></section>
 
       <section className="grid gap-4 xl:grid-cols-[1.4fr_1fr]"><article className="rounded-lg border bg-card p-4"><div className="mb-3 text-sm font-semibold">Tendencia operativa</div><TrendChart records={filtered} /></article><article className="rounded-lg border bg-card p-4"><div className="mb-3 flex items-center gap-2 text-sm font-semibold"><UsersRound className="size-4 text-primary" />Gerentes dentro del alcance</div><div className="grid gap-2">{Array.from(new Map(filtered.flatMap((record) => [[`area-${record.operationalAreaId}`, { name: record.areaManagerName, scope: record.operationalAreaName }], [`branch-${record.branchId}`, { name: record.branchManagerName, scope: record.branchName }]])).values()).filter((manager): manager is { name: string; scope: string | null } => Boolean(manager.name)).map((manager) => <div className="rounded-lg border p-3 text-sm" key={`${manager.name}-${manager.scope}`}><div className="font-medium">{manager.name}</div><div className="mt-1 text-xs text-muted-foreground">{manager.scope ?? "Asignación autorizada"}</div></div>)}</div><p className="mt-3 text-xs leading-5 text-muted-foreground">Solo se muestran nombres y asignaciones autorizadas; no se exponen bonos, categoría ni nivel de gestión.</p></article></section>
       </>}

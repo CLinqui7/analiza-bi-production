@@ -377,6 +377,18 @@ async function waitForDashboard(title) {
   }
 }
 
+async function assertNoDuplicateReactKeyWarnings(context) {
+  const entries = await driver.manage().logs().get("browser");
+  const duplicateKeyWarnings = entries
+    .map((entry) => entry.message)
+    .filter((message) => /Encountered two children with the same key/.test(message));
+  assert.deepEqual(
+    duplicateKeyWarnings,
+    [],
+    `${context} must render every branch-line unit with a unique React key.`,
+  );
+}
+
 async function setGlobalPeriod(from, to) {
   const fromInput = await driver.wait(until.elementLocated(By.css('input[aria-label="Fecha desde"]')), 10_000);
   const toInput = await driver.wait(until.elementLocated(By.css('input[aria-label="Fecha hasta"]')), 10_000);
@@ -1247,6 +1259,40 @@ try {
     { branchId: branchA.id, lineId: laboratoryLine.data.id, lineName: "Laboratorio QA", period: "2026-06" },
     { branchId: branchA.id, lineId: imagingLine.data.id, lineName: "Imágenes QA", period: "2026-05" },
   ]) await verifyManagerLineViews(view);
+
+  // Exercise multiple business lines in one branch. A branch-only React key
+  // used to make lines vanish from the aggregate views and made the map
+  // select the wrong unit.
+  await driver.manage().logs().get("browser");
+  const aggregatePeriodQuery = `from=2026-05-01&to=2026-09-30&branch=${branchA.id}`;
+  await driver.get(`${baseUrl}/protected/resultados?${aggregatePeriodQuery}`);
+  await waitForDashboard("Resultados operativos");
+  const aggregateResults = await bodyText();
+  for (const lineName of ["Fisioterapia", "Laboratorio QA", "Imágenes QA"]) {
+    assert.match(aggregateResults, new RegExp(lineName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${lineName} must remain visible in aggregate Resultados.`);
+  }
+  await assertNoDuplicateReactKeyWarnings("Resultados aggregate view");
+
+  await driver.manage().logs().get("browser");
+  await driver.get(`${baseUrl}/protected/sucursales?${aggregatePeriodQuery}`);
+  await waitForDashboard("Sucursales");
+  const laboratoryUnit = await driver.wait(
+    until.elementLocated(
+      By.css(`[data-record-id="${branchA.id}:${laboratoryLine.data.id}"]`),
+    ),
+    15_000,
+  );
+  await laboratoryUnit.click();
+  const drilldown = await driver.wait(
+    until.elementLocated(By.css("[data-testid=bi-drilldown]")),
+    10_000,
+  );
+  assert.match(
+    await drilldown.getText(),
+    /Laboratorio QA/,
+    "Selecting a map unit must open that business line, not a sibling line of the same branch.",
+  );
+  await assertNoDuplicateReactKeyWarnings("Sucursal aggregate view");
   await capture("all-lines-published");
 
   await writeFile(
