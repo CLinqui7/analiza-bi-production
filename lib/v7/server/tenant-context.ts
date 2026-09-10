@@ -65,14 +65,18 @@ export type TenantContextOptions = {
   isDemo: boolean;
 };
 
+type RelatedRow<T> = T | T[] | null;
 type CountryRow = { id: string; name: string; iso2: string };
 type CompanyRow = { id: string; name: string; key: string };
 type BranchRow = {
+  company?: RelatedRow<CompanyRow>;
   id: string;
   name: string;
   code: string;
   company_id: string;
+  country?: RelatedRow<CountryRow>;
   country_id: string;
+  operational_area?: RelatedRow<AreaRow>;
   operational_area_id: string | null;
   city: string | null;
   status: string | null;
@@ -110,6 +114,7 @@ type ManagerAssignmentRow = {
   branch_id: string | null;
   operational_area_id: string | null;
   profile_id: string;
+  role?: RelatedRow<RoleRow>;
   role_id: string;
 };
 type RoleRow = { id: string; key: string };
@@ -158,6 +163,15 @@ function uniqueManagerOptions(items: ManagerOption[]) {
       ]),
     ).values(),
   );
+}
+
+function relatedRow<T>(value: RelatedRow<T> | undefined): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
+function uniqueRowsById<T extends { id: string }>(rows: T[]) {
+  return Array.from(new Map(rows.map((row) => [row.id, row])).values());
 }
 
 function reportingMonths(reference = new Date()) {
@@ -285,6 +299,9 @@ async function getTenantContextOptionsUncached(
     hasOnlyConcreteBranchGrants &&
     operationalAreaGrantIds.length > 0 &&
     actorGrants.every((grant) => Boolean(grant.operationalAreaId));
+  const branchSelect = hasOnlyConcreteBranchGrants
+    ? "id,name,code,company_id,country_id,operational_area_id,city,status,country:countries(id,name,iso2),company:companies(id,name,key),operational_area:operational_areas(id,name,code,company_id,country_id,manager_profile_id)"
+    : "id,name,code,company_id,country_id,operational_area_id,city,status";
 
   const [
     countriesResult,
@@ -297,7 +314,9 @@ async function getTenantContextOptionsUncached(
     rolesResult,
   ] = await traceNavigationStage(trace, "context_catalog_queries", () =>
     Promise.all([
-    (() => {
+    hasOnlyConcreteBranchGrants
+      ? Promise.resolve({ data: [] as CountryRow[] })
+      : (() => {
       let query = supabase
         .from("countries")
         .select("id,name,iso2")
@@ -305,7 +324,9 @@ async function getTenantContextOptionsUncached(
       if (canRestrictCountries) query = query.in("id", countryGrantIds);
       return query.order("name");
     })(),
-    (() => {
+    hasOnlyConcreteBranchGrants
+      ? Promise.resolve({ data: [] as CompanyRow[] })
+      : (() => {
       let query = supabase
         .from("companies")
         .select("id,name,key")
@@ -327,7 +348,9 @@ async function getTenantContextOptionsUncached(
         query = query.in("id", lineGrantIds);
       return query.order("name");
     })(),
-    (() => {
+    hasOnlyConcreteBranchGrants
+      ? Promise.resolve({ data: [] as AreaRow[] })
+      : (() => {
       let query = supabase
         .from("operational_areas")
         .select("id,name,code,company_id,country_id,manager_profile_id")
@@ -341,9 +364,7 @@ async function getTenantContextOptionsUncached(
     (() => {
       let query = supabase
         .from("branches")
-        .select(
-          "id,name,code,company_id,country_id,operational_area_id,city,status",
-        )
+        .select(branchSelect)
         .eq("organization_id", organizationId)
         .in("status", ["active", "pending_manager"]);
       if (hasOnlyConcreteBranchGrants) query = query.in("id", branchGrantIds);
@@ -362,7 +383,7 @@ async function getTenantContextOptionsUncached(
     (() => {
       let query = supabase
         .from("manager_assignments")
-        .select("profile_id,role_id,operational_area_id,branch_id")
+        .select("profile_id,role_id,operational_area_id,branch_id,role:roles(id,key)")
         .eq("organization_id", organizationId)
         .eq("status", "active")
         .is("deactivated_at", null);
@@ -370,21 +391,50 @@ async function getTenantContextOptionsUncached(
         query = query.in("branch_id", branchGrantIds);
       return query;
     })(),
-      supabase.from("roles").select("id,key"),
+      hasOnlyConcreteBranchGrants
+        ? Promise.resolve({ data: [] as RoleRow[] })
+        : supabase.from("roles").select("id,key"),
     ]),
   );
 
-  const countries = (countriesResult.data ?? []) as CountryRow[];
-  const companies = (companiesResult.data ?? []) as CompanyRow[];
+  // Concrete branch scopes obtain their parent catalog rows through the
+  // verified branch relationships, cutting four independent HTTP requests.
+  const branches = (branchesResult.data ?? []) as unknown as BranchRow[];
+  const embeddedCountries = branches.flatMap((branch) => {
+    const country = relatedRow(branch.country);
+    return country ? [country] : [];
+  });
+  const embeddedCompanies = branches.flatMap((branch) => {
+    const company = relatedRow(branch.company);
+    return company ? [company] : [];
+  });
+  const embeddedAreas = branches.flatMap((branch) => {
+    const area = relatedRow(branch.operational_area);
+    return area ? [area] : [];
+  });
+  const countries = hasOnlyConcreteBranchGrants
+    ? uniqueRowsById(embeddedCountries)
+    : ((countriesResult.data ?? []) as CountryRow[]);
+  const companies = hasOnlyConcreteBranchGrants
+    ? uniqueRowsById(embeddedCompanies)
+    : ((companiesResult.data ?? []) as CompanyRow[]);
   const lines = (linesResult.data ?? []) as LineRow[];
-  const areas = (areasResult.data ?? []) as AreaRow[];
-  const branches = (branchesResult.data ?? []) as BranchRow[];
+  const areas = hasOnlyConcreteBranchGrants
+    ? uniqueRowsById(embeddedAreas)
+    : ((areasResult.data ?? []) as AreaRow[]);
   const branchManagerRows = (branchManagersResult.data ??
     []) as BranchManagerRow[];
   const managerAssignmentRows = (managerAssignmentsResult.data ??
-    []) as ManagerAssignmentRow[];
+    []) as unknown as ManagerAssignmentRow[];
+  const embeddedRoles = managerAssignmentRows.flatMap((assignment) => {
+    const role = relatedRow(assignment.role);
+    return role ? [role] : [];
+  });
   const roleKeyById = new Map(
-    ((rolesResult.data ?? []) as RoleRow[]).map((role) => [role.id, role.key]),
+    (hasOnlyConcreteBranchGrants
+      ? uniqueRowsById(embeddedRoles)
+      : ((rolesResult.data ?? []) as RoleRow[])
+    ).map((role) => [role.id, role.key]),
   );
 
   const visibleBranches = branches.filter((item) =>

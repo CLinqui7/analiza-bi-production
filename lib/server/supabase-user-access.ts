@@ -2,24 +2,11 @@ import { getSupabaseAdminClient } from "@/lib/supabase/admin";
 import type { CurrentUserScope } from "@/lib/tenant/current-user-access";
 import { roleKeys, type RoleKey } from "@/lib/tenant/demo-context";
 
-type ProfileRow = {
-  default_branch_id: string | null;
-  default_company_id: string | null;
-  default_country_id: string | null;
-  email: string | null;
-  id: string;
-  organization_id: string | null;
-  status: string | null;
-};
+type RelatedRow<T> = T | T[] | null;
 
-type UserRoleRow = {
-  branch_id: string | null;
-  company_id: string | null;
-  country_id: string | null;
-  operational_area_id?: string | null;
-  organization_id: string | null;
-  role_id: string;
-  status?: string | null;
+type NamedRow = {
+  id: string;
+  name: string | null;
 };
 
 type RoleRow = {
@@ -30,16 +17,43 @@ type RoleRow = {
 type BranchRow = {
   city: string | null;
   code: string | null;
+  company?: RelatedRow<NamedRow>;
   company_id: string | null;
+  country?: RelatedRow<NamedRow>;
   country_id: string | null;
   id: string;
   name: string | null;
+  operational_area?: RelatedRow<NamedRow>;
   operational_area_id?: string | null;
 };
 
-type NamedRow = {
+type ProfileRow = {
+  default_branch?: RelatedRow<BranchRow>;
+  default_branch_id: string | null;
+  default_company?: RelatedRow<NamedRow>;
+  default_company_id: string | null;
+  default_country?: RelatedRow<NamedRow>;
+  default_country_id: string | null;
+  email: string | null;
   id: string;
-  name: string | null;
+  organization?: RelatedRow<NamedRow>;
+  organization_id: string | null;
+  status: string | null;
+};
+
+type UserRoleRow = {
+  branch?: RelatedRow<BranchRow>;
+  branch_id: string | null;
+  company?: RelatedRow<NamedRow>;
+  company_id: string | null;
+  country?: RelatedRow<NamedRow>;
+  country_id: string | null;
+  operational_area?: RelatedRow<NamedRow>;
+  operational_area_id?: string | null;
+  organization_id: string | null;
+  role?: RelatedRow<RoleRow>;
+  role_id: string;
+  status?: string | null;
 };
 
 export type SupabaseDirectoryUserAccess = {
@@ -64,6 +78,16 @@ const rolePriority: RoleKey[] = [
 
 function coerceRoleKey(value: string | null | undefined): RoleKey {
   return roleKeys.includes(value as RoleKey) ? (value as RoleKey) : "viewer";
+}
+
+function relatedRow<T>(value: RelatedRow<T> | undefined): T | null {
+  if (!value) return null;
+  return Array.isArray(value) ? (value[0] ?? null) : value;
+}
+
+function relatedName(value: RelatedRow<NamedRow> | undefined, id: string | null) {
+  const related = relatedRow(value);
+  return related?.id === id ? related.name : null;
 }
 
 function pickRole(assignments: UserRoleRow[], rolesById: Map<string, RoleKey>) {
@@ -92,12 +116,14 @@ async function readUserRoles(userId: string) {
   const extended = await admin
     .from("user_roles")
     .select(
-      "role_id, organization_id, country_id, company_id, branch_id, operational_area_id, status",
+      "role_id, organization_id, country_id, company_id, branch_id, operational_area_id, status, role:roles(id,key), country:countries(id,name), company:companies(id,name), operational_area:operational_areas(id,name), branch:branches(id,name,code,city,country_id,company_id,operational_area_id,country:countries(id,name),company:companies(id,name),operational_area:operational_areas(id,name))",
     )
     .eq("user_id", userId);
 
   if (!extended.error) {
-    return (extended.data ?? []) as UserRoleRow[];
+    // The generated Database type predates these verified PostgREST embedded
+    // relationships, so narrow the runtime response through unknown.
+    return (extended.data ?? []) as unknown as UserRoleRow[];
   }
 
   const core = await admin
@@ -108,6 +134,34 @@ async function readUserRoles(userId: string) {
   return core.error ? [] : ((core.data ?? []) as UserRoleRow[]);
 }
 
+async function readProfile(userId: string) {
+  const admin = getSupabaseAdminClient();
+
+  if (!admin) return null;
+
+  const extended = await admin
+    .from("profiles")
+    .select(
+      "id,email,status,organization_id,default_country_id,default_company_id,default_branch_id,organization:organizations!profiles_organization_id_fkey(id,name),default_country:countries!profiles_default_country_id_fkey(id,name),default_company:companies!profiles_default_company_id_fkey(id,name),default_branch:branches!profiles_default_branch_id_fkey(id,name,code,city,country_id,company_id,operational_area_id,country:countries(id,name),company:companies(id,name),operational_area:operational_areas(id,name))",
+    )
+    .eq("id", userId)
+    .maybeSingle();
+
+  if (!extended.error) {
+    return extended.data as ProfileRow | null;
+  }
+
+  const core = await admin
+    .from("profiles")
+    .select(
+      "id,email,status,organization_id,default_country_id,default_company_id,default_branch_id",
+    )
+    .eq("id", userId)
+    .maybeSingle();
+
+  return core.error ? null : (core.data as ProfileRow | null);
+}
+
 async function readBranch(branchId: string | null) {
   const admin = getSupabaseAdminClient();
 
@@ -115,7 +169,9 @@ async function readBranch(branchId: string | null) {
 
   const extended = await admin
     .from("branches")
-    .select("id, name, code, city, country_id, company_id, operational_area_id")
+    .select(
+      "id,name,code,city,country_id,company_id,operational_area_id,country:countries(id,name),company:companies(id,name),operational_area:operational_areas(id,name)",
+    )
     .eq("id", branchId)
     .maybeSingle();
 
@@ -156,43 +212,44 @@ export async function getSupabaseDirectoryUserAccess(
 
   if (!admin) return null;
 
-  const [profileResult, assignments, rolesResult] = await Promise.all([
-    admin
-      .from("profiles")
-      .select(
-        "id, email, status, organization_id, default_country_id, default_company_id, default_branch_id",
-      )
-      .eq("id", userId)
-      .maybeSingle(),
+  const [profile, assignments] = await Promise.all([
+    readProfile(userId),
     readUserRoles(userId),
-    // Roles are a small, server-only catalog. Reading them with the profile
-    // and assignments removes a dependent authorization round trip without
-    // broadening the actor's scope.
-    admin.from("roles").select("id, key"),
   ]);
 
-  if (profileResult.error || !profileResult.data) {
+  if (!profile) {
     return null;
   }
-
-  const profile = profileResult.data as ProfileRow;
 
   if (profile.status === "suspended") {
     return null;
   }
 
-  const rolesById = new Map<string, RoleKey>(
-    ((rolesResult.data ?? []) as RoleRow[]).map((role) => [
-      role.id,
-      coerceRoleKey(role.key),
-    ]),
+  const rolesById = new Map(
+    assignments.flatMap((assignment) => {
+      const role = relatedRow(assignment.role);
+      return role ? [[role.id, coerceRoleKey(role.key)] as const] : [];
+    }),
   );
+  if (assignments.some((assignment) => !rolesById.has(assignment.role_id))) {
+    // Compatibility for older schemas where embedded relationships are not
+    // exposed. Current production resolves roles in the joined request above.
+    const rolesResult = await admin.from("roles").select("id,key");
+    for (const role of (rolesResult.data ?? []) as RoleRow[]) {
+      rolesById.set(role.id, coerceRoleKey(role.key));
+    }
+  }
   const selected = pickRole(assignments, rolesById);
   const assignment = selected?.assignment ?? null;
   const roleKey = selected?.roleKey ?? "viewer";
 
   const branchId = assignment?.branch_id ?? profile.default_branch_id ?? null;
-  const branch = await readBranch(branchId);
+  const assignedBranch = relatedRow(assignment?.branch);
+  const defaultBranch = relatedRow(profile.default_branch);
+  const branch =
+    (assignedBranch?.id === branchId ? assignedBranch : null) ??
+    (defaultBranch?.id === branchId ? defaultBranch : null) ??
+    (await readBranch(branchId));
   const organizationId =
     assignment?.organization_id ?? profile.organization_id ?? null;
   const countryId =
@@ -208,12 +265,28 @@ export async function getSupabaseDirectoryUserAccess(
   const operationalAreaId =
     assignment?.operational_area_id ?? branch?.operational_area_id ?? null;
 
+  const embeddedOrganizationName = relatedName(
+    profile.organization,
+    organizationId,
+  );
+  const embeddedCountryName =
+    relatedName(assignment?.country, countryId) ??
+    relatedName(profile.default_country, countryId) ??
+    relatedName(branch?.country, countryId);
+  const embeddedCompanyName =
+    relatedName(assignment?.company, companyId) ??
+    relatedName(profile.default_company, companyId) ??
+    relatedName(branch?.company, companyId);
+  const embeddedOperationalAreaName =
+    relatedName(assignment?.operational_area, operationalAreaId) ??
+    relatedName(branch?.operational_area, operationalAreaId);
   const [organizationName, countryName, companyName, operationalAreaName] =
     await Promise.all([
-      readName("organizations", organizationId),
-      readName("countries", countryId),
-      readName("companies", companyId),
-      readName("operational_areas", operationalAreaId),
+      embeddedOrganizationName ?? readName("organizations", organizationId),
+      embeddedCountryName ?? readName("countries", countryId),
+      embeddedCompanyName ?? readName("companies", companyId),
+      embeddedOperationalAreaName ??
+        readName("operational_areas", operationalAreaId),
     ]);
 
   return {

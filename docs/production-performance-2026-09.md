@@ -136,3 +136,11 @@ La comparación temporal anterior de 1111–1644 ms no se mezcla con A: aquella 
 ### Validación y rollback
 
 Se ejecutaron lint, typecheck, la suite de pruebas, escaneo de secretos y build local. La regresión autenticada de producción se repite contra el alias final. El rollback es reasignar el alias a `dpl_CDx2HyS5vmeqNZ5Egtx8W1BBV9fN` o revertir `770a51f`; no requiere esquema, RLS, variables ni proveedores nuevos.
+
+## Tercera optimización: latencia intermitente de autorización y contexto (2026-09-10)
+
+Una nueva corrida A, con tres sesiones limpias por ruta y cero solicitudes previas al clic, mantuvo Formulario en 811–821 ms y Resultados en 819–831 ms. También reveló picos reales: Historial tuvo una muestra de 3386 ms y Metas muestras de 1838, 2365 y 5966 ms. En esos picos no hubo scripts descargados ni tareas largas después del clic; la traza correlacionada ubicó el costo en autorización (hasta 4183 ms), catálogos de contexto (hasta 1215 ms) y snapshot oficial (hasta 1357 ms).
+
+El candidato reduce rondas HTTP sin cambiar la decisión de acceso. La lectura del directorio obtiene perfil, rol activo, sucursal y nombres de alcance mediante relaciones PostgREST verificadas contra el esquema productivo; si una instalación antigua no expone esas relaciones, conserva las consultas compatibles anteriores. Para un actor cuyos grants son todos sucursales concretas, los catálogos padre se obtienen dentro de la consulta de sucursales y el rol dentro de las asignaciones: el bloque paralelo pasa de ocho solicitudes a cuatro. Los actores globales conservan el catálogo completo.
+
+No hay caché pública ni caché de permisos entre peticiones. La asignación activa, su estado y los grants se vuelven a leer en cada solicitud, por lo que revocaciones y cambios de rol siguen siendo inmediatos. No se añadieron índices, migraciones, regiones, dependencias ni datos. La aceptación requiere volver a desplegar un candidato validado y repetir exactamente las muestras A; los picos previos se conservan y no se mezclan con revisitas.
