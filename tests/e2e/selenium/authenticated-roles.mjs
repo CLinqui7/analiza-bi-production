@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { randomBytes } from "node:crypto";
 import { execFileSync } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { basename, resolve } from "node:path";
 import { Builder, By, until } from "selenium-webdriver";
 import chrome from "selenium-webdriver/chrome.js";
 import { createClient } from "@supabase/supabase-js";
@@ -13,6 +13,10 @@ const baseUrl = (process.env.QA_BASE_URL ?? "http://localhost:3000").replace(
   "",
 );
 const artifacts = resolve("artifacts/selenium/authenticated-roles");
+const monthlyEvidenceFixture = resolve(
+  process.env.QA_EVIDENCE_PATH ?? "tests/e2e/fixtures/monthly-evidence.csv",
+);
+const monthlyEvidenceFileName = basename(monthlyEvidenceFixture);
 await mkdir(artifacts, { recursive: true });
 
 const fileEnv = Object.fromEntries(
@@ -312,7 +316,7 @@ async function publishCompleteMonthlyLine({ assignmentLabel, branchId, lineId, l
   const incompleteSave = await driver.executeScript("return window.__qaLastSave;");
   assert.equal(incompleteSave.status, 201, `${lineName} incomplete draft must be created with HTTP 201.`);
   assert.ok((await driver.findElements(By.css("[data-testid=monthly-pending-blockers]"))).length === 1, `${lineName} incomplete draft must expose blockers.`);
-  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
+  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(monthlyEvidenceFixture);
   await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
   await driver.executeScript("window.__qaLastPublish = null;");
   await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
@@ -324,7 +328,7 @@ async function publishCompleteMonthlyLine({ assignmentLabel, branchId, lineId, l
   await driver.findElement(By.css("[data-testid=monthly-save-draft]")).click();
   await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastSave;")), 15_000);
   assert.equal((await driver.executeScript("return window.__qaLastSave;")).status, 201, `${lineName} completed draft must be versioned with HTTP 201.`);
-  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
+  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(monthlyEvidenceFixture);
   await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
   await driver.executeScript("window.__qaLastPublish = null;");
   await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
@@ -1146,12 +1150,16 @@ try {
     "An incomplete draft must show publication blockers as pending work.",
   );
   const evidenceInput = await driver.findElement(By.css("[data-testid=monthly-evidence-input]"));
-  await evidenceInput.sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
+  await evidenceInput.sendKeys(monthlyEvidenceFixture);
   await driver.wait(
     async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()),
     30_000,
   );
-  assert.match(await bodyText(), /monthly-evidence\.csv/, "The finalized CSV attachment must be visible.");
+  assert.match(
+    await bodyText(),
+    new RegExp(monthlyEvidenceFileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    `The finalized ${monthlyEvidenceFileName} attachment must be visible.`,
+  );
   await capture("gs-incomplete-attachment");
   await driver.executeScript("window.__qaLastPublish = null; window.__qaLastSave = null;");
   await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
@@ -1208,7 +1216,7 @@ try {
   assert.equal(secondPhysiotherapySave.status, 201, `Physiotherapy completed draft must be versioned with HTTP 201: ${JSON.stringify(secondPhysiotherapySave.body)}`);
   const completedSave = JSON.parse(secondPhysiotherapySave.request ?? "{}");
   assert.equal(completedSave.responses?.patients_total, 1, "The completed save must contain patients_total.");
-  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(resolve("tests/e2e/fixtures/monthly-evidence.csv"));
+  await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(monthlyEvidenceFixture);
   await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
   await driver.executeScript("window.__qaLastPublish = null;");
   await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
