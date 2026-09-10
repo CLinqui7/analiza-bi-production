@@ -18,6 +18,12 @@ export type AuthorizationActor = {
   canInviteOperationalUsers?: boolean;
   email: string;
   requiresPasswordChange?: boolean;
+  /**
+   * Server-resolved role identity for this request. It is never read from a
+   * client claim and lets downstream grant resolution avoid re-reading the
+   * role catalog after the directory has already validated the assignment.
+   */
+  roleId?: string | null;
   roleKey: RoleKey;
   scope: ScopeBoundary;
   source: AuthorizationActorSource;

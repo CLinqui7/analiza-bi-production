@@ -163,6 +163,7 @@ async function readSupabaseAuthorizationActor(): Promise<AuthorizationActor | nu
       allowDemoRoleSwitch: false,
       email: directoryUser.email,
       requiresPasswordChange: directoryUser.requiresPasswordChange,
+      roleId: directoryUser.roleId,
       roleKey: directoryUser.roleKey,
       scope: directoryScope,
       source: "supabase",

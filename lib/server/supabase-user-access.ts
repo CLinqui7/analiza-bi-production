@@ -45,6 +45,7 @@ type NamedRow = {
 export type SupabaseDirectoryUserAccess = {
   email: string;
   requiresPasswordChange: boolean;
+  roleId: string | null;
   roleKey: RoleKey;
   scope: CurrentUserScope;
   userId: string;
@@ -218,6 +219,11 @@ export async function getSupabaseDirectoryUserAccess(
   return {
     email: profile.email?.trim() || emailFallback,
     requiresPasswordChange: false,
+    // The role was read from the server-side assignment in this request.
+    // Passing only its opaque ID downstream avoids an otherwise redundant
+    // roles catalog request; every request still resolves the assignment, so
+    // deactivation and role changes take effect immediately.
+    roleId: assignment?.role_id ?? null,
     roleKey,
     scope: {
       branchCity: branch?.city ?? null,

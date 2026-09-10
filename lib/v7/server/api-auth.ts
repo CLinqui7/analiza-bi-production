@@ -20,7 +20,7 @@ export function toV7Actor(
     email: actor.email,
     displayName: actor.email,
     roleKey: actor.roleKey,
-    roleId: null,
+    roleId: actor.roleId ?? null,
     scope: actor.scope,
     scopeGrants: [actor.scope],
     isDemo: actor.source === "demo",
@@ -44,20 +44,28 @@ async function resolveV7ActorFromCurrentUncached(
     return base;
   }
 
-  const { data: roleData } = await traceNavigationStage(
-    trace,
-    "grant_role_catalog",
-    () =>
-      admin
-        .from("roles")
-        .select("id")
-        .eq("key", actor.roleKey)
-        .maybeSingle(),
-  );
+  // Directory resolution has just read the selected server-side assignment.
+  // Reuse its role ID within this request. Compatibility actors that do not
+  // have a directory role retain the catalog lookup and the same fail-closed
+  // behavior.
+  let roleId = base.roleId;
 
-  const role = roleData as { id: string } | null;
+  if (!roleId) {
+    const { data: roleData } = await traceNavigationStage(
+      trace,
+      "grant_role_catalog",
+      () =>
+        admin
+          .from("roles")
+          .select("id")
+          .eq("key", actor.roleKey)
+          .maybeSingle(),
+    );
 
-  if (!role?.id) {
+    roleId = (roleData as { id: string } | null)?.id ?? null;
+  }
+
+  if (!roleId) {
     return base;
   }
 
@@ -71,7 +79,7 @@ async function resolveV7ActorFromCurrentUncached(
           )
           .eq("user_id", actor.userId)
           .eq("organization_id", actor.scope.organizationId)
-          .eq("role_id", role.id)
+          .eq("role_id", roleId)
           .eq("status", "active"),
       ),
       traceNavigationStage(trace, "grant_manager_assignments", () =>
@@ -82,7 +90,7 @@ async function resolveV7ActorFromCurrentUncached(
           )
           .eq("profile_id", actor.userId)
           .eq("organization_id", actor.scope.organizationId)
-          .eq("role_id", role.id)
+          .eq("role_id", roleId)
           .eq("status", "active"),
       ),
     ]);
@@ -127,7 +135,7 @@ async function resolveV7ActorFromCurrentUncached(
 
   return {
     ...base,
-    roleId: role.id,
+    roleId,
     scopeGrants:
       distinctScopeGrants.length > 0 ? distinctScopeGrants : base.scopeGrants,
   };

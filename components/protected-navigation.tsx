@@ -19,6 +19,7 @@ import {
 } from "react";
 
 import type { RoleKey } from "@/lib/tenant/demo-context";
+import { cn } from "@/lib/utils";
 
 type NavigationIntent = {
   href: string;
@@ -239,6 +240,7 @@ export function ProtectedNavigationProvider({
 export function NavigationLink({
   href,
   children,
+  className,
   onClick,
   onFocus,
   onMouseEnter,
@@ -278,7 +280,13 @@ export function NavigationLink({
     <Link
       {...props}
       aria-busy={isIntentPending || undefined}
+      className={cn(
+        "transition-[opacity,filter] duration-100",
+        className,
+        isIntentPending && "cursor-progress opacity-70 saturate-50",
+      )}
       data-navigation-link="true"
+      data-navigation-feedback={isIntentPending ? "accepted" : "idle"}
       data-navigation-pending={isIntentPending ? "true" : "false"}
       href={href}
       onClick={handleClick}

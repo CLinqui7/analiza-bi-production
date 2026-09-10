@@ -437,6 +437,7 @@ export function MonthlySubmissionCenter({
   const [dirty, setDirty] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [recent, setRecent] = useState<RecentSubmission[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
@@ -571,6 +572,7 @@ export function MonthlySubmissionCenter({
     busyOperationRef.current += 1;
     activeContextKeyRef.current = nextContextKey;
     setBusy(null);
+    setUploadProgress(null);
     setMessage(null);
   }
 
@@ -785,6 +787,13 @@ export function MonthlySubmissionCenter({
             contentType: file.type || "application/octet-stream",
           },
           onError: (error) => reject(error),
+          onProgress: (bytesUploaded, bytesTotal) => {
+            if (bytesTotal > 0) {
+              setUploadProgress(
+                Math.min(100, Math.round((bytesUploaded / bytesTotal) * 100)),
+              );
+            }
+          },
           onSuccess: () => resolve(),
         });
         void upload.findPreviousUploads().then((previousUploads) => {
@@ -825,6 +834,7 @@ export function MonthlySubmissionCenter({
     const requestContextKey = activeContextKeyRef.current;
     const requestRevision = contextRevisionRef.current;
     setMessage(null);
+    setUploadProgress(0);
     try {
       for (const file of files) {
         const ticketResponse = await fetch(`/api/monthly-submissions/${saved.submissionId}/attachments/upload-ticket`, {
@@ -856,6 +866,7 @@ export function MonthlySubmissionCenter({
         setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudieron cargar los archivos." });
       }
     } finally {
+      setUploadProgress(null);
       clearBusy(operationId);
     }
   }
@@ -1204,11 +1215,11 @@ export function MonthlySubmissionCenter({
           ) : (
             <>
               {attachments.length < 2 && !currentVersionPublished && canWrite && (
-                <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center hover:bg-muted/30">
+                <label className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center ${busy === "upload" ? "cursor-wait opacity-70" : "cursor-pointer hover:bg-muted/30"}`}>
                   {busy === "upload" ? <Loader2 className="size-7 animate-spin text-primary" /> : <UploadCloud className="size-7 text-primary" />}
-                  <span className="mt-2 text-sm font-medium">{attachments.length === 0 ? "Seleccionar Excel del reporte" : "Agregar archivo de respaldo"}</span>
+                  <span className="mt-2 text-sm font-medium">{busy === "upload" ? `Cargando archivo${uploadProgress === null ? "" : `: ${uploadProgress}%`}` : attachments.length === 0 ? "Seleccionar Excel del reporte" : "Agregar archivo de respaldo"}</span>
                   <span className="mt-1 text-xs text-muted-foreground">Obligatorio para publicar: XLSX, XLS o CSV. Opcional como segundo archivo: PDF, Word, PowerPoint, TXT, PNG o JPG · máximo 15 MB c/u</span>
-                  <input className="sr-only" data-testid="monthly-evidence-input" type="file" accept={acceptedFiles} multiple={attachments.length === 0} onChange={(event) => { void uploadFiles(event.target.files); event.currentTarget.value = ""; }} />
+                  <input aria-busy={busy === "upload" || undefined} className="sr-only" data-testid="monthly-evidence-input" disabled={busy !== null} type="file" accept={acceptedFiles} multiple={attachments.length === 0} onChange={(event) => { void uploadFiles(event.target.files); event.currentTarget.value = ""; }} />
                 </label>
               )}
 
@@ -1295,7 +1306,7 @@ export function MonthlySubmissionCenter({
             </div>
           )}
           {message && (
-            <div className={`rounded-md border p-3 text-sm ${message.type === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`}>
+            <div aria-live="polite" className={`rounded-md border p-3 text-sm ${message.type === "ok" ? "border-emerald-200 bg-emerald-50 text-emerald-900" : "border-red-200 bg-red-50 text-red-900"}`} role={message.type === "error" ? "alert" : "status"}>
               {message.type === "ok" ? <CheckCircle2 className="mr-2 inline size-4" /> : <AlertCircle className="mr-2 inline size-4" />}{message.text}
             </div>
           )}
