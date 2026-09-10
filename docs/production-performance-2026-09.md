@@ -144,3 +144,16 @@ Una nueva corrida A, con tres sesiones limpias por ruta y cero solicitudes previ
 El candidato reduce rondas HTTP sin cambiar la decisión de acceso. La lectura del directorio obtiene perfil, rol activo, sucursal y nombres de alcance mediante relaciones PostgREST verificadas contra el esquema productivo; si una instalación antigua no expone esas relaciones, conserva las consultas compatibles anteriores. Para un actor cuyos grants son todos sucursales concretas, los catálogos padre se obtienen dentro de la consulta de sucursales y el rol dentro de las asignaciones: el bloque paralelo pasa de ocho solicitudes a cuatro. Los actores globales conservan el catálogo completo.
 
 No hay caché pública ni caché de permisos entre peticiones. La asignación activa, su estado y los grants se vuelven a leer en cada solicitud, por lo que revocaciones y cambios de rol siguen siendo inmediatos. No se añadieron índices, migraciones, regiones, dependencias ni datos. La aceptación requiere volver a desplegar un candidato validado y repetir exactamente las muestras A; los picos previos se conservan y no se mezclan con revisitas.
+
+### Resultado desplegado y regresión
+
+El código `9cc0285` se construyó localmente y en Vercel con 71 rutas, y quedó publicado como `dpl_FVGaUoWQjTpmYSvuXJTjQMD7hg9s` en IAD1. Durante la primera regresión autenticada, una lectura de Resultados superó el límite de 15 segundos; se revirtió inmediatamente el alias a `dpl_2G64jPbyqKAbzeGzrx1v93KLrGWo`. El deployment nuevo no registró errores de runtime. Una segunda regresión completa, ejecutada sobre su URL inmutable, terminó con `authenticatedRoles: PASS` y `qaCleanup: PASS`; después de las mediciones aisladas se promovió exactamente ese mismo artefacto, sin reconstruirlo. El alias final resolvió de nuevo al ID nuevo y `/api/health` respondió 200 con `Cache-Control: no-store`.
+
+| Ruta | Escenario A | Feedback (ms) | Contenido final (ms) | Usable (ms) | Muestras |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Formulario | no visitada, sin precarga | 66, 76, 62 | 804, 829, 799 | 1046, 1017, 1039 | 3 |
+| Historial | no visitada, sin precarga | 83, 79, 104 | 825, 1304, 852 | 847, 1325, 891 | 3 |
+| Resultados | no visitada, sin precarga | 57, 111, 85 | 824, 843, 815 | 839, 899, 838 | 3 |
+| Metas | no visitada, sin precarga | 91, 77, 57 | 808, 804, 799 | 831, 819, 810 | 3 |
+
+Antes del cambio, las tres muestras de Metas fueron 1838, 5966 y 2365 ms a contenido; después fueron 808, 804 y 799 ms. La etapa de autorización bajó de 158–4183 ms a 58–114 ms y los catálogos de contexto de 65–1215 ms a 54–408 ms. La muestra más lenta posterior fue Historial en 1304 ms, asociada a 408 ms de catálogos; no se oculta ni se mezcla con revisitas. Formulario, Resultados y Metas quedaron alrededor de 0.8 segundos a contenido, todavía por encima del objetivo de 300 ms. El navegador descargó 0 B de scripts después del clic en las doce muestras; hubo una sola tarea larga de 52 ms, por lo que el trabajo eliminado y la mejora demostrada corresponden al servidor/Supabase, no a una atribución genérica de hidratación.
