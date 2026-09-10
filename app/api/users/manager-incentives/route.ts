@@ -40,6 +40,7 @@ const bonusDirectoryRoles = new Set<RoleKey>([
   "super_admin",
   "webmaster_admin",
   "ceo",
+  "gerente_operaciones",
 ]);
 
 const managerDirectoryColumns =

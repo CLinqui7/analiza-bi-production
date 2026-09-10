@@ -154,7 +154,7 @@ assert.ok(managerBonusNavigation, "Manager bonus navigation entry is missing.");
 
 for (const requiredRole of [
   "...adminRoles",
-  '"ceo"',
+  "...ceoFocusedRoles",
 ]) {
   assert.ok(
     managerBonusNavigation.includes(requiredRole),
@@ -162,8 +162,12 @@ for (const requiredRole of [
   );
 }
 
+assert.ok(
+  navigation.includes('const ceoFocusedRoles: RoleKey[] = ["ceo", "gerente_operaciones"]'),
+  "CEO-equivalent GO access must be explicit in the navigation role set.",
+);
+
 for (const forbiddenRole of [
-  '"gerente_operaciones"',
   '"gerente_area"',
   '"gerente_sucursal"',
 ]) {

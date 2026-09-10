@@ -120,6 +120,13 @@ export type ManualMonthlyFormField = {
   id: string;
   label: string;
   description: string;
+  /**
+   * Some operational measures share a technical identifier because they feed
+   * the same validated aggregate KPI. Their user-facing meaning must still
+   * remain specific to the business line that reports them.
+   */
+  labelByLine?: Partial<Record<ImportBusinessLine, string>>;
+  descriptionByLine?: Partial<Record<ImportBusinessLine, string>>;
   inputType: ManualMonthlyFormInputType;
   unit: string;
   required: boolean;
@@ -134,6 +141,9 @@ export type ManualMonthlyFormStep = {
   title: string;
   description: string;
   ownerNote: string;
+  titleByLine?: Partial<Record<ImportBusinessLine, string>>;
+  descriptionByLine?: Partial<Record<ImportBusinessLine, string>>;
+  ownerNoteByLine?: Partial<Record<ImportBusinessLine, string>>;
   fields: ManualMonthlyFormField[];
 };
 
@@ -1172,11 +1182,31 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
       "Recoge ventas, metas, pacientes y ticket para medir desempeno real por negocio.",
     ownerNote:
       "AnaliA compara estos valores contra meta, meses anteriores y linea seleccionada.",
+    titleByLine: {
+      Fisioterapia: "Produccion terapeutica",
+      Imagenes: "Produccion por estudios",
+    },
+    descriptionByLine: {
+      Fisioterapia: "Registra ingresos, meta y pacientes de los servicios terapeuticos del mes.",
+      Imagenes: "Registra ingresos, meta y pacientes asociados a estudios diagnosticos del mes.",
+    },
+    ownerNoteByLine: {
+      Fisioterapia: "Reporta solo totales anonimos de terapias; las sesiones se detallan en el siguiente paso.",
+      Imagenes: "Reporta solo totales anonimos de estudios; los informes se detallan en el siguiente paso.",
+    },
     fields: [
       {
         id: "gross_revenue",
         label: "Ingreso bruto",
         description: "Venta total antes de descuentos, anulaciones o notas.",
+        labelByLine: {
+          Fisioterapia: "Ingreso bruto de fisioterapia",
+          Imagenes: "Ingreso bruto por estudios",
+        },
+        descriptionByLine: {
+          Fisioterapia: "Venta de terapias antes de descuentos, anulaciones o notas.",
+          Imagenes: "Venta de estudios antes de descuentos, anulaciones o notas.",
+        },
         inputType: "currency",
         unit: "USD",
         required: true,
@@ -1188,6 +1218,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "net_revenue",
         label: "Ingreso neto",
         description: "Ingreso que realmente alimenta margen y avance de meta.",
+        labelByLine: {
+          Fisioterapia: "Ingreso neto de fisioterapia",
+          Imagenes: "Ingreso neto por estudios",
+        },
         inputType: "currency",
         unit: "USD",
         required: true,
@@ -1199,6 +1233,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "revenue_target",
         label: "Meta de ingreso",
         description: "Meta final aprobada para el mes y sucursal.",
+        labelByLine: {
+          Fisioterapia: "Meta de ingreso terapéutico",
+          Imagenes: "Meta de ingreso por estudios",
+        },
         inputType: "currency",
         unit: "USD",
         required: true,
@@ -1210,6 +1248,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "patients_total",
         label: "Pacientes atendidos",
         description: "Conteo anonimo de pacientes o clientes atendidos.",
+        labelByLine: {
+          Fisioterapia: "Pacientes en fisioterapia",
+          Imagenes: "Pacientes con estudios realizados",
+        },
         inputType: "number",
         unit: "pacientes",
         required: true,
@@ -1221,6 +1263,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "ticket_average",
         label: "Ticket promedio",
         description: "Promedio de ingreso por paciente, orden, sesion o estudio.",
+        labelByLine: {
+          Fisioterapia: "Ingreso promedio por paciente terapéutico",
+          Imagenes: "Ingreso promedio por estudio",
+        },
         inputType: "currency",
         unit: "USD",
         required: true,
@@ -1391,11 +1437,23 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
       "Separa volumen realizado, estados de citas y atrasos para explicar la operacion.",
     ownerNote:
       "Estos datos alimentan Operacion ejecutiva, Citas por negocio y alertas tempranas.",
+    titleByLine: {
+      Fisioterapia: "Agenda y sesiones terapeuticas",
+      Imagenes: "Agenda, estudios e informes",
+    },
+    descriptionByLine: {
+      Fisioterapia: "Separa citas, sesiones y planes de tratamiento para explicar la atencion terapeutica.",
+      Imagenes: "Separa citas, estudios e informes para explicar la operacion diagnostica.",
+    },
     fields: [
       {
         id: "appointments_completed",
         label: "Citas completadas",
         description: "Citas que llegaron a atencion o servicio realizado.",
+        labelByLine: {
+          Fisioterapia: "Citas terapeuticas completadas",
+          Imagenes: "Citas para estudios completadas",
+        },
         inputType: "number",
         unit: "citas",
         required: true,
@@ -1407,6 +1465,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "appointments_no_show",
         label: "No-show",
         description: "Citas en las que el paciente no se presento.",
+        labelByLine: {
+          Fisioterapia: "Ausencias a cita terapeutica",
+          Imagenes: "Ausencias a cita de estudio",
+        },
         inputType: "number",
         unit: "citas",
         required: true,
@@ -1418,6 +1480,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "appointments_cancelled",
         label: "Canceladas",
         description: "Citas canceladas antes del servicio.",
+        labelByLine: {
+          Fisioterapia: "Citas terapeuticas canceladas",
+          Imagenes: "Citas de estudio canceladas",
+        },
         inputType: "number",
         unit: "citas",
         required: true,
@@ -1429,6 +1495,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "sla_on_time_rate",
         label: "Cumplimiento SLA",
         description: "Porcentaje de atenciones, informes o entregas dentro del tiempo esperado.",
+        labelByLine: {
+          Fisioterapia: "Atenciones terapeuticas a tiempo",
+          Imagenes: "Informes y estudios a tiempo",
+        },
         inputType: "percent",
         unit: "%",
         required: true,
@@ -1490,11 +1560,23 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
       "Mide cuanto recurso disponible se uso y cuanto se perdio por espera, agenda o equipo.",
     ownerNote:
       "La ocupacion efectiva no se publica si faltan horas disponibles o usadas.",
+    titleByLine: {
+      Fisioterapia: "Capacidad del equipo terapeutico",
+      Imagenes: "Capacidad de equipos diagnosticos",
+    },
+    descriptionByLine: {
+      Fisioterapia: "Mide el uso y las horas perdidas del equipo de terapeutas.",
+      Imagenes: "Mide el uso, la indisponibilidad y las horas perdidas de los equipos diagnosticos.",
+    },
     fields: [
       {
         id: "available_hours",
         label: "Horas disponibles",
         description: "Capacidad disponible del mes por sucursal, equipo o profesional.",
+        labelByLine: {
+          Fisioterapia: "Horas disponibles de terapeutas",
+          Imagenes: "Horas disponibles de equipos",
+        },
         inputType: "number",
         unit: "horas",
         required: true,
@@ -1506,6 +1588,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "used_hours",
         label: "Horas utilizadas",
         description: "Horas realmente usadas para servicios completados.",
+        labelByLine: {
+          Fisioterapia: "Horas usadas en terapias",
+          Imagenes: "Horas usadas en estudios",
+        },
         inputType: "number",
         unit: "horas",
         required: true,
@@ -1517,6 +1603,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "effective_occupancy_rate",
         label: "Ocupacion efectiva",
         description: "Porcentaje real de capacidad usada.",
+        labelByLine: {
+          Fisioterapia: "Ocupacion del equipo terapeutico",
+          Imagenes: "Ocupacion de equipos diagnosticos",
+        },
         inputType: "percent",
         unit: "%",
         required: true,
@@ -1529,6 +1619,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "lost_capacity_hours",
         label: "Horas de capacidad perdida",
         description: "Horas perdidas por cancelaciones, equipo fuera de servicio o brechas de agenda.",
+        labelByLine: {
+          Fisioterapia: "Horas terapeuticas perdidas",
+          Imagenes: "Horas de equipo perdidas",
+        },
         inputType: "number",
         unit: "horas",
         required: false,
@@ -1894,11 +1988,23 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
       "Permite separar costo directo, gasto fijo, gasto variable y margen por linea.",
     ownerNote:
       "Finanzas y operaciones deben poder reconciliar estos campos antes de publicar.",
+    titleByLine: {
+      Fisioterapia: "Costos de atencion terapeutica",
+      Imagenes: "Costos tecnicos y mantenimiento",
+    },
+    descriptionByLine: {
+      Fisioterapia: "Separa los costos de prestar terapias y el margen del periodo.",
+      Imagenes: "Separa costos de estudios, insumos y mantenimiento de equipos.",
+    },
     fields: [
       {
         id: "direct_costs",
         label: "Costos directos",
         description: "Costos asociados directamente a producir los servicios.",
+        labelByLine: {
+          Fisioterapia: "Costos directos de terapias",
+          Imagenes: "Costos directos de estudios",
+        },
         inputType: "currency",
         unit: "USD",
         required: true,
@@ -1910,6 +2016,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "fixed_costs",
         label: "Gastos fijos",
         description: "Gastos que no cambian proporcionalmente con el volumen mensual.",
+        labelByLine: {
+          Fisioterapia: "Gastos fijos de fisioterapia",
+          Imagenes: "Gastos fijos de imagenes",
+        },
         inputType: "currency",
         unit: "USD",
         required: true,
@@ -1921,6 +2031,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "variable_costs",
         label: "Gastos variables",
         description: "Gastos que suben o bajan segun volumen, compras o demanda.",
+        labelByLine: {
+          Fisioterapia: "Gastos variables de fisioterapia",
+          Imagenes: "Insumos y gastos variables de imagenes",
+        },
         inputType: "currency",
         unit: "USD",
         required: true,
@@ -1932,6 +2046,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "gross_margin_rate",
         label: "Margen bruto",
         description: "Margen porcentual despues de costos directos.",
+        labelByLine: {
+          Fisioterapia: "Margen bruto de fisioterapia",
+          Imagenes: "Margen bruto de estudios",
+        },
         inputType: "percent",
         unit: "%",
         required: true,
@@ -2027,6 +2145,14 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
       "Carga el reporte comercial de examenes medicos y montos vendidos.",
     ownerNote:
       "El archivo esperado contiene Fecha, Sucursal, Doctor, Examen, Especialidad, Area, Total y Visitador.",
+    titleByLine: {
+      Fisioterapia: "Validacion del cierre terapeutico",
+      Imagenes: "Validacion del cierre de estudios",
+    },
+    descriptionByLine: {
+      Fisioterapia: "Registra la declaracion y, si aplica, el motivo de una carga tardia de fisioterapia.",
+      Imagenes: "Registra la declaracion y, si aplica, el motivo de una carga tardia de estudios.",
+    },
     fields: [
       {
         id: "medical_exam_sales_file",
@@ -2065,6 +2191,10 @@ export const manualMonthlyFormSteps: ManualMonthlyFormStep[] = [
         id: "manager_attestation",
         label: "Confirmacion del gerente",
         description: "Declaracion corta de cierre sin datos personales visibles.",
+        labelByLine: {
+          Fisioterapia: "Confirmacion del cierre de fisioterapia",
+          Imagenes: "Confirmacion del cierre de imagenes",
+        },
         inputType: "text",
         unit: "texto",
         required: true,
@@ -2209,7 +2339,16 @@ export function getManualMonthlyFormStepsForLine(
   return manualMonthlyFormSteps
     .map((step) => ({
       ...step,
-      fields: step.fields.filter((field) => field.appliesTo.includes(line)),
+      title: step.titleByLine?.[line] ?? step.title,
+      description: step.descriptionByLine?.[line] ?? step.description,
+      ownerNote: step.ownerNoteByLine?.[line] ?? step.ownerNote,
+      fields: step.fields
+        .filter((field) => field.appliesTo.includes(line))
+        .map((field) => ({
+          ...field,
+          label: field.labelByLine?.[line] ?? field.label,
+          description: field.descriptionByLine?.[line] ?? field.description,
+        })),
     }))
     .filter((step) => step.fields.length > 0);
 }

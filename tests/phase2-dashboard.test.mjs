@@ -357,7 +357,8 @@ for (const readableScreenPath of [
 }
 
 for (const requiredRoleScopeText of [
-  'const ceoFocusedRoles: RoleKey[] = ["ceo"]',
+  'const ceoFocusedRoles: RoleKey[] = ["ceo", "gerente_operaciones"]',
+  "const executiveLineReadRoles: RoleKey[] = ceoFocusedRoles",
   'const operationsFocusedRoles: RoleKey[] = ["gerente_operaciones"]',
   "adminDataRoles",
 ]) {

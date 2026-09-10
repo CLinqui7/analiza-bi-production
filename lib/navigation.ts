@@ -104,9 +104,9 @@ const delegatedUserAdminRoles: RoleKey[] = [
   "gerente_operaciones",
 ];
 
-const ceoFocusedRoles: RoleKey[] = ["ceo"];
+const ceoFocusedRoles: RoleKey[] = ["ceo", "gerente_operaciones"];
 const operationsFocusedRoles: RoleKey[] = ["gerente_operaciones"];
-const executiveLineReadRoles: RoleKey[] = ["ceo"];
+const executiveLineReadRoles: RoleKey[] = ceoFocusedRoles;
 const adminDataRoles: RoleKey[] = [...adminRoles, "gerente_operaciones"];
 const adminFinancialReviewRoles: RoleKey[] = adminRoles;
 const deepDiagnosticRoles: RoleKey[] = [];
@@ -210,7 +210,7 @@ export const navigationItems: NavigationItem[] = [
     group: "gestion",
     allowedRoles: [
       ...adminRoles,
-      "ceo",
+      ...ceoFocusedRoles,
     ],
   },
   {

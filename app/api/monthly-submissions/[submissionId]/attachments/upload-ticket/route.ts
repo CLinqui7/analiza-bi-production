@@ -65,7 +65,7 @@ export async function POST(request: Request, context: { params: Promise<{ submis
 
   // The file itself is uploaded browser → Supabase Storage (TUS). This API only
   // issues the authorized object path, so a 15 MB document never crosses a
-  // Netlify Function request body.
+  // Vercel Function request body.
   return NextResponse.json({
     storageBucket: "monthly-evidence",
     storagePath,

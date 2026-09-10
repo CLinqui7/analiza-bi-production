@@ -80,7 +80,9 @@ function status(record: BranchBiRecord) {
 
 function titleFor(mode: DashboardMode, roleKey: RoleKey) {
   if (mode === "home") {
-    return roleKey === "ceo" ? "Panel ejecutivo" : "Gobierno y lectura oficial";
+    return ["ceo", "gerente_operaciones"].includes(roleKey)
+      ? "Panel ejecutivo"
+      : "Gobierno y lectura oficial";
   }
   if (mode === "history") return "Historial de cierres";
   if (mode === "branch") return "Mi sucursal";

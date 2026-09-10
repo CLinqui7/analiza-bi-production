@@ -42,6 +42,41 @@ import type { TenantContextOptions } from "@/lib/v7/server/tenant-context";
 const acceptedFiles = ".xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg";
 const maxFileBytes = 15 * 1024 * 1024;
 
+function resumableStorageEndpoint(baseUrl: string) {
+  const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
+
+  try {
+    const url = new URL(normalizedBaseUrl);
+    const projectDomainSuffix = ".supabase.co";
+    if (
+      url.protocol === "https:" &&
+      url.hostname.endsWith(projectDomainSuffix) &&
+      url.hostname !== "supabase.co"
+    ) {
+      const projectRef = url.hostname.slice(0, -projectDomainSuffix.length);
+      return `https://${projectRef}.storage.supabase.co/storage/v1/upload/resumable`;
+    }
+  } catch {
+    throw new Error("La configuración de carga de evidencias no es válida.");
+  }
+
+  return `${normalizedBaseUrl}/storage/v1/upload/resumable`;
+}
+
+function resumableUploadErrorMessage(error: unknown) {
+  const detail = error instanceof Error ? error.message : "";
+  if (/\b(401|403)\b|unauthori[sz]ed|forbidden/i.test(detail)) {
+    return "No pudimos autorizar la carga. Actualiza la sesión e intenta de nuevo.";
+  }
+  if (/\b409\b|already exists|conflict/i.test(detail)) {
+    return "Este archivo ya tiene una carga en curso. Espera unos segundos e intenta de nuevo.";
+  }
+  if (/network|fetch|cors|timeout/i.test(detail)) {
+    return "La conexión interrumpió la carga. Verifica tu red e intenta de nuevo.";
+  }
+  return "No se pudo transferir el archivo. Intenta nuevamente; si persiste, contacta soporte con la hora aproximada de la carga.";
+}
+
 type SelectOption = { id: string; name: string };
 
 const categoricalFieldOptions: Record<string, string[]> = {
@@ -425,17 +460,6 @@ export function MonthlySubmissionCenter({
     return getMonthlyFormSteps(formLine)
       .map((candidate) => {
         const visibleFields = candidate.fields.filter((field) => field.inputType !== "file");
-
-        if (candidate.id === "calidad-validacion" && formLine !== "Laboratorio") {
-          return {
-            ...candidate,
-            title: "Cierre y autorización",
-            description: "Confirma excepciones y la declaración del gerente antes de adjuntar el Excel o CSV en el paso final.",
-            ownerNote: "Las respuestas se seleccionan desde opciones controladas; el archivo se carga después.",
-            fields: visibleFields,
-          };
-        }
-
         return { ...candidate, fields: visibleFields };
       })
       .filter((candidate) => candidate.fields.length > 0);
@@ -723,7 +747,11 @@ export function MonthlySubmissionCenter({
     }
   }
 
-  async function uploadFileToSupabaseStorage(file: File, storagePath: string) {
+  async function uploadFileToSupabaseStorage(
+    file: File,
+    storageBucket: string,
+    storagePath: string,
+  ) {
     // TUS is loaded only when the user reaches the final step and selects a
     // file. Keeping it out of the initial bundle makes the three forms faster.
     const [{ Upload }, { createClient }] = await Promise.all([
@@ -736,32 +764,53 @@ export function MonthlySubmissionCenter({
     if (!accessToken) throw new Error("Tu sesión expiró. Inicia sesión nuevamente antes de cargar evidencia.");
     const baseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     if (!baseUrl) throw new Error("Supabase Storage no está configurado.");
+    const publicKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+    if (!publicKey) throw new Error("La carga de evidencias no está configurada.");
 
-    await new Promise<void>((resolve, reject) => {
-      const upload = new Upload(file, {
-        endpoint: `${baseUrl.replace(/\/$/, "")}/storage/v1/upload/resumable`,
-        retryDelays: [0, 3000, 5000, 10000, 20000],
-        headers: { authorization: `Bearer ${accessToken}` },
-        uploadDataDuringCreation: true,
-        removeFingerprintOnSuccess: true,
-        chunkSize: 6 * 1024 * 1024,
-        metadata: {
-          bucketName: "monthly-evidence",
-          objectName: storagePath,
-          contentType: file.type || "application/octet-stream",
-        },
-        onError: (error) => reject(error),
-        onSuccess: () => resolve(),
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const upload = new Upload(file, {
+          endpoint: resumableStorageEndpoint(baseUrl),
+          retryDelays: [0, 3000, 5000, 10000, 20000],
+          headers: {
+            apikey: publicKey,
+            authorization: `Bearer ${accessToken}`,
+          },
+          uploadDataDuringCreation: true,
+          removeFingerprintOnSuccess: true,
+          chunkSize: 6 * 1024 * 1024,
+          metadata: {
+            bucketName: storageBucket,
+            objectName: storagePath,
+            contentType: file.type || "application/octet-stream",
+          },
+          onError: (error) => reject(error),
+          onSuccess: () => resolve(),
+        });
+        void upload.findPreviousUploads().then((previousUploads) => {
+          if (previousUploads.length > 0) upload.resumeFromPreviousUpload(previousUploads[0]!);
+          upload.start();
+        }).catch(reject);
       });
-      void upload.findPreviousUploads().then((previousUploads) => {
-        if (previousUploads.length > 0) upload.resumeFromPreviousUpload(previousUploads[0]!);
-        upload.start();
-      }).catch(reject);
-    });
+    } catch (error) {
+      throw new Error(resumableUploadErrorMessage(error));
+    }
   }
 
   async function uploadFiles(fileList: FileList | null) {
-    if (!saved || dirty || !fileList || fileList.length === 0 || !canWrite) return;
+    if (!fileList || fileList.length === 0) return;
+    if (!canWrite) {
+      setMessage({ type: "error", text: "No tienes permiso para adjuntar evidencia a este cierre." });
+      return;
+    }
+    if (!saved) {
+      setMessage({ type: "error", text: "Guarda el borrador antes de adjuntar el Excel." });
+      return;
+    }
+    if (dirty) {
+      setMessage({ type: "error", text: "Guarda la nueva versión del formulario antes de adjuntar el Excel." });
+      return;
+    }
     const files = Array.from(fileList);
     if (files.length + attachments.length > 2) {
       setMessage({ type: "error", text: "Puedes tener máximo 2 archivos por versión." });
@@ -783,12 +832,12 @@ export function MonthlySubmissionCenter({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ versionId: saved.versionId, fileName: file.name, byteSize: file.size, mimeType: file.type || undefined }),
         });
-        const ticket = (await ticketResponse.json()) as { storagePath?: string; error?: string; message?: string };
-        if (!ticketResponse.ok || !ticket.storagePath) throw new Error(ticket.message ?? ticket.error ?? "No se pudo autorizar la carga del archivo.");
+        const ticket = (await ticketResponse.json()) as { storageBucket?: string; storagePath?: string; error?: string; message?: string };
+        if (!ticketResponse.ok || !ticket.storageBucket || !ticket.storagePath) throw new Error(ticket.message ?? ticket.error ?? "No se pudo autorizar la carga del archivo.");
 
-        // Browser → Supabase Storage via TUS. Large evidence bypasses Netlify's
+        // Browser → Supabase Storage via TUS. Large evidence bypasses Vercel's
         // function payload path and remains protected by the Storage RLS policy.
-        await uploadFileToSupabaseStorage(file, ticket.storagePath);
+        await uploadFileToSupabaseStorage(file, ticket.storageBucket, ticket.storagePath);
 
         const finalizeResponse = await fetch(`/api/monthly-submissions/${saved.submissionId}/attachments/finalize`, {
           method: "POST",

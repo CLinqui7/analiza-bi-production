@@ -234,6 +234,18 @@ assert.equal(
   "Managers must not access records outside their operational area.",
 );
 
+assert.equal(
+  canAccessRecord(operationsActor, {
+    organizationId,
+    countryId: "country-other",
+    companyId: "company-other",
+    operationalAreaId: "area-other",
+    branchId: "branch-other",
+  }),
+  true,
+  "Gerente de Operaciones must have the same organization-wide executive record scope as CEO.",
+);
+
 const deactivationPlan = buildSoftDeactivationPlan({
   actor: operationsActor,
   subordinateCount: 0,

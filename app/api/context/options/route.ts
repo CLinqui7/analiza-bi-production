@@ -32,7 +32,7 @@ function managersForActor(
   countryIds: ReadonlySet<string>,
   context: TenantContextOptions,
 ) {
-  if (["ceo", "super_admin", "webmaster_admin"].includes(roleKey)) {
+  if (["ceo", "gerente_operaciones", "super_admin", "webmaster_admin"].includes(roleKey)) {
     return uniqueManagers([...context.areaManagers, ...context.branchManagers]);
   }
 

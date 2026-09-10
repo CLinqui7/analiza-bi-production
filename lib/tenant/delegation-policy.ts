@@ -279,7 +279,11 @@ export function canAssignBranchToArea(
 }
 
 export function canAccessRecord(actor: DelegationActor, targetScope: ScopeBoundary) {
-  if (isSuperAdministrator(actor.roleKey) || actor.roleKey === "ceo") {
+  if (
+    isSuperAdministrator(actor.roleKey) ||
+    actor.roleKey === "ceo" ||
+    actor.roleKey === "gerente_operaciones"
+  ) {
     return actor.scope.organizationId === targetScope.organizationId;
   }
 

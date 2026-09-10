@@ -4,6 +4,10 @@ import { cache } from "react";
 
 import type { Actor, ScopeBoundary } from "@/lib/v7/security/types";
 import {
+  hasOrganizationWideExecutiveAccess,
+  isSuperAdministrator,
+} from "@/lib/v7/security/authorization-policy";
+import {
   demoBranches,
   demoBusinessLineOptions,
   demoCompanies,
@@ -110,7 +114,12 @@ type ManagerAssignmentRow = {
 };
 type RoleRow = { id: string; key: string };
 
-const globalRoles = new Set(["super_admin", "webmaster_admin", "ceo"]);
+function hasGlobalCatalogAccess(actor: Actor) {
+  return (
+    isSuperAdministrator(actor.roleKey) ||
+    hasOrganizationWideExecutiveAccess(actor.roleKey)
+  );
+}
 
 function grantsFor(actor: Actor) {
   return actor.scopeGrants && actor.scopeGrants.length > 0
@@ -136,7 +145,7 @@ function matchesGrant(grant: ScopeBoundary, target: ScopeBoundary) {
 }
 
 export function actorCanSee(actor: Actor, target: ScopeBoundary) {
-  if (globalRoles.has(actor.roleKey)) return true;
+  if (hasGlobalCatalogAccess(actor)) return true;
   return grantsFor(actor).some((grant) => matchesGrant(grant, target));
 }
 
@@ -220,7 +229,7 @@ async function getTenantContextOptionsUncached(
     ? createAdminClient()
     : await createClient();
   const organizationId = actor.scope.organizationId;
-  const isGlobal = globalRoles.has(actor.roleKey);
+  const isGlobal = hasGlobalCatalogAccess(actor);
   const actorGrants = grantsFor(actor);
   // A branch manager with only concrete branch grants must not download the
   // organization directory merely to render a monthly form. Broader grants

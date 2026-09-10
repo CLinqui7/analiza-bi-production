@@ -11,6 +11,7 @@ import {
   isNonNegativeCountId,
   numericMonthlyValue,
 } from "../lib/monthly-form-values.ts";
+import { getManualMonthlyFormStepsForLine } from "../lib/analytics/import-operations.ts";
 
 const contract = readFileSync("lib/monthly-form-contract.ts", "utf8");
 const form = readFileSync("components/production/monthly-submission-center.tsx", "utf8");
@@ -29,6 +30,42 @@ assert.match(contract, /field\.min !== undefined && parsed < field\.min/, "Negat
 assert.match(form, /No tenemos \/ Registrar 0/, "The UI must persist an explicit zero rather than displaying an ambiguous placeholder.");
 assert.match(form, /placeholder=\{allowsExplicitZero \? "Sin responder"/, "Zero-capable fields must show an unambiguous empty state.");
 assert.match(definitions, /lab_nurses_count[\s\S]*appliesTo: \["Laboratorio"\]/, "Laboratory personnel fields must stay scoped to Laboratory.");
+
+const physiotherapyForm = getManualMonthlyFormStepsForLine("Fisioterapia");
+const imagingForm = getManualMonthlyFormStepsForLine("Imagenes");
+const laboratoryForm = getManualMonthlyFormStepsForLine("Laboratorio");
+const physiotherapyTitles = physiotherapyForm.map((step) => step.title);
+const imagingTitles = imagingForm.map((step) => step.title);
+const laboratoryTitles = laboratoryForm.map((step) => step.title);
+
+assert.notDeepEqual(
+  physiotherapyTitles,
+  imagingTitles,
+  "Fisioterapia and Imagenes must render distinct monthly form stages.",
+);
+assert.ok(
+  physiotherapyTitles.includes("Agenda y sesiones terapeuticas"),
+  "Fisioterapia must identify its therapeutic workflow.",
+);
+assert.ok(
+  imagingTitles.includes("Agenda, estudios e informes"),
+  "Imagenes must identify its diagnostic workflow.",
+);
+assert.ok(
+  laboratoryTitles.includes("Inventario"),
+  "Laboratorio must retain its independent inventory workflow.",
+);
+assert.ok(
+  physiotherapyForm.flatMap((step) => step.fields).some((field) => field.label === "Pacientes en fisioterapia"),
+  "Fisioterapia commercial copy must remain line-specific.",
+);
+assert.ok(
+  imagingForm.flatMap((step) => step.fields).some((field) => field.label === "Pacientes con estudios realizados"),
+  "Imagenes commercial copy must remain line-specific.",
+);
+assert.match(form, /\.storage\.supabase\.co\/storage\/v1\/upload\/resumable/, "Resumable uploads must use the Storage host.");
+assert.match(form, /apikey: publicKey/, "Resumable uploads must include the public Supabase key.");
+assert.match(form, /Guarda el borrador antes de adjuntar el Excel/, "An unavailable uploader must explain how to proceed.");
 
 const assignmentA = monthlyDraftKey("branch-a:line-lab", "2026-09");
 const assignmentB = monthlyDraftKey("branch-b:line-physio", "2026-09");

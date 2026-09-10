@@ -247,10 +247,20 @@ async function selectMonthlyAssignment(assignmentLabel, templateSlug) {
   }
   assert.ok(option, `QA assignment must exist: ${assignmentLabel}`);
   const assignmentId = await option.getAttribute("value");
-  await assignment.sendKeys(assignmentLabel);
-  await driver.wait(async () => (await assignment.getAttribute("value")) === assignmentId, 10_000);
+  await driver.executeScript(
+    `const select=arguments[0], value=arguments[1];
+      const set=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;
+      set.call(select,value); select.dispatchEvent(new Event('input',{bubbles:true})); select.dispatchEvent(new Event('change',{bubbles:true}));`,
+    assignment,
+    assignmentId,
+  );
   const template = await driver.wait(until.elementLocated(By.css("[data-testid=monthly-download-template]")), 15_000);
-  assert.match(await template.getAttribute("href"), new RegExp(`/api/monthly-templates/${templateSlug}\\?format=xlsx$`), "The visible template button must match only the current assignment line.");
+  await driver.wait(
+    async () => new RegExp(`/api/monthly-templates/${templateSlug}\\?format=xlsx$`).test(
+      (await template.getAttribute("href")) ?? "",
+    ),
+    10_000,
+  );
 }
 
 async function setMonthlyPeriod(period) {
@@ -435,36 +445,20 @@ try {
     .single();
   fail(organization.error, "QA organization creation");
   organizationId = organization.data.id;
-  const [country, outsideCountry] = await Promise.all([
-    admin
-      .from("countries")
-      .insert({
-        currency_id: currency.data.id,
-        date_format: "YYYY-MM-DD",
-        is_demo: false,
-        iso2: "QA",
-        name: "QA Sintético",
-        organization_id: organizationId,
-        time_zone: "UTC",
-      })
-      .select("id")
-      .single(),
-    admin
-      .from("countries")
-      .insert({
-        currency_id: currency.data.id,
-        date_format: "YYYY-MM-DD",
-        is_demo: false,
-        iso2: "QB",
-        name: "QA Fuera de alcance",
-        organization_id: organizationId,
-        time_zone: "UTC",
-      })
-      .select("id")
-      .single(),
-  ]);
+  const country = await admin
+    .from("countries")
+    .insert({
+      currency_id: currency.data.id,
+      date_format: "YYYY-MM-DD",
+      is_demo: false,
+      iso2: "QA",
+      name: "QA Sintético",
+      organization_id: organizationId,
+      time_zone: "UTC",
+    })
+    .select("id")
+    .single();
   fail(country.error, "QA country creation");
-  fail(outsideCountry.error, "QA outside-country creation");
   const company = await admin
     .from("companies")
     .insert({
@@ -657,7 +651,6 @@ try {
       user_id: ceoId,
     },
     {
-      country_id: country.data.id,
       organization_id: organizationId,
       role_id: roleId.gerente_operaciones,
       status: "active",
@@ -915,25 +908,20 @@ try {
 
   await login(emails.go);
   await expectNavigation({
-    managerBonuses: false,
+    managerBonuses: true,
     roleHome: false,
     roleKey: "gerente_operaciones",
     users: true,
   });
   await driver.get(`${baseUrl}/protected`);
-  await waitForDashboard("Resultados operativos");
-  assert.equal(
-    (await driver.findElements(By.css('select[aria-label="País"]'))).length,
-    0,
-    "GO country must be fixed instead of selectable",
-  );
+  await waitForDashboard("Panel ejecutivo");
   await openGlobalFilters();
   const goContextOptions = await request("/api/context/options");
   const goManagerIds = goContextOptions.options.managers.map((manager) => manager.id);
   assert.deepEqual(
     new Set(goManagerIds),
-    new Set([gaId, gaPeerId]),
-    "GO must receive only in-country GA UUID manager options.",
+    new Set([gaId, gaPeerId, gsAId, gsBId]),
+    "GO must receive the same manager options as CEO within the organization.",
   );
   const goManagerFilter = await driver.wait(until.elementLocated(By.css('select[aria-label="Gerente"]')), 10_000);
   const goManagerOptionValues = await goManagerFilter.findElements(By.css("option"));
@@ -941,8 +929,8 @@ try {
     .filter((value) => value && !value.startsWith("__"));
   assert.deepEqual(
     new Set(goVisibleManagerIds),
-    new Set([gaId, gaPeerId]),
-    "GO header must only render GA UUID options.",
+    new Set([gaId, gaPeerId, gsAId, gsBId]),
+    "GO header must render the same manager options as CEO.",
   );
   const insideCreation = await request(
     "/api/branches",
@@ -964,23 +952,12 @@ try {
   );
   assert.equal(createInside.status, 200, "GO must create a branch in-country");
   assertNoFalseSuccess(createInside, "GO in-country branch creation");
-  const createOutside = await driver.executeAsyncScript(
-    `const done=arguments[arguments.length-1]; fetch('/api/branches',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(${JSON.stringify({
-      city: "QA",
-      code: `QA-${run}-OUT`,
-      name: "Sucursal QA fuera de alcance",
-      reason: "Prueba de bloqueo por país GO",
-      scope: {
-        companyId: company.data.id,
-        countryId: outsideCountry.data.id,
-        organizationId,
-      },
-    })})}).then(async response=>done({body:await response.json(),status:response.status})).catch(error=>done({error:String(error),status:0}));`,
+  await request("/api/users/manager-incentives");
+  await driver.get(`${baseUrl}/protected/gerentes`);
+  await driver.wait(
+    until.elementLocated(By.xpath("//*[normalize-space(.)='Gerentes y bonos']")),
+    15_000,
   );
-  assert.equal(createOutside.status, 403, "GO must not create a branch outside country");
-  assert.equal(createOutside.body?.ok, false, "outside-country branch must be explicitly denied");
-  await request("/api/users/manager-incentives", 403);
-  await assertForbidden("/protected/gerentes");
   await capture("go");
 
   await login(emails.ga);
@@ -1185,14 +1162,24 @@ try {
     }
     const selects = await driver.findElements(By.css("select:not([disabled])"));
     for (const select of selects) {
-      const isPeriod = await driver.executeScript("return Boolean(arguments[0].closest('[data-testid=monthly-period]'));", select);
-      if (!isPeriod) {
+      const isContextSelect = await driver.executeScript(
+        "return Boolean(arguments[0].closest('[data-testid=monthly-period],[data-testid=monthly-assignment]'));",
+        select,
+      );
+      if (!isContextSelect) {
         const choices = await select.findElements(By.css("option"));
         if (choices.length > 1) await choices[1].click();
       }
     }
   }
-  const commercialStep = await driver.findElement(By.xpath("//button[contains(., 'Resultados comerciales')]"));
+  const physiotherapySteps = await driver.findElements(By.css("[data-testid=monthly-form-steps] button"));
+  const commercialStep = physiotherapySteps[1];
+  assert.ok(commercialStep, "Physiotherapy must render its production step.");
+  assert.match(
+    await commercialStep.getText(),
+    /Produccion terapeutica/,
+    "Physiotherapy must use its business-specific production label.",
+  );
   await driver.executeScript("arguments[0].scrollIntoView({ block: 'center' });", commercialStep);
   await commercialStep.click();
   const patientsTotal = await driver.wait(until.elementLocated(By.css("#monthly-patients_total")), 10_000);

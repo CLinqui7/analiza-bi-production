@@ -238,10 +238,13 @@ const outOfScopeOperations = actor("gerente_operaciones", {
   countryId,
 });
 
-assertDecisionError("BONUS_DECISION_FORBIDDEN", () =>
-  decideBonus(outOfScopeOperations, recommendation(), {
-    action: "approve",
-  }),
+const executiveOperationsDecision = decideBonus(outOfScopeOperations, recommendation(), {
+  action: "approve",
+});
+assert.equal(
+  executiveOperationsDecision.status,
+  "APPROVED",
+  "Gerente de Operaciones must approve a bonus with the same organization scope as CEO.",
 );
 
 console.log("Bonus workflow checks passed.");

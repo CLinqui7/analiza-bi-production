@@ -12,6 +12,14 @@ const hierarchy: Record<RoleKey, number> = {
   viewer: 10,
 };
 
+/**
+ * CEO and Gerente de Operaciones consume the same organization-wide executive
+ * read model. Administrative-only actions remain governed by actionRoles.
+ */
+export function hasOrganizationWideExecutiveAccess(roleKey: RoleKey) {
+  return roleKey === "ceo" || roleKey === "gerente_operaciones";
+}
+
 const actionRoles: Record<ActionKey, RoleKey[]> = {
   "dashboard.read": [
     "super_admin",
@@ -36,7 +44,7 @@ const actionRoles: Record<ActionKey, RoleKey[]> = {
   "goals.manage": ["super_admin", "webmaster_admin", "ceo", "gerente_operaciones"],
   "users.read": ["super_admin", "webmaster_admin", "gerente_operaciones"],
   "users.invite": ["super_admin", "webmaster_admin", "gerente_operaciones"],
-  "roles.read": ["super_admin", "webmaster_admin", "ceo"],
+  "roles.read": ["super_admin", "webmaster_admin", "ceo", "gerente_operaciones"],
   "audit.read": ["super_admin", "webmaster_admin"],
   "exports.create": ["super_admin", "webmaster_admin", "ceo", "gerente_operaciones", "gerente_area", "gerente_sucursal", "viewer"],
   "structure.manage": ["super_admin", "webmaster_admin", "gerente_operaciones"],
@@ -60,7 +68,10 @@ export function canAccessRecord(actor: Actor, target: ScopeBoundary) {
     return false;
   }
 
-  if (isSuperAdministrator(actor.roleKey)) {
+  if (
+    isSuperAdministrator(actor.roleKey) ||
+    hasOrganizationWideExecutiveAccess(actor.roleKey)
+  ) {
     return true;
   }
 
