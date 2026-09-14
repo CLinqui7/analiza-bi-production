@@ -62,6 +62,16 @@ assert.match(
   "Accepted navigation needs visible feedback, not only an internal flag.",
 );
 assert.match(
+  navigation,
+  /onPointerDown=\{handlePointerDown\}/,
+  "Pointer navigation must expose feedback before the click event completes.",
+);
+assert.match(
+  navigation,
+  /active:opacity-70 active:saturate-50/,
+  "Pointer navigation must have an immediate pressed visual state.",
+);
+assert.match(
   monthlyForm,
   /onProgress: \(bytesUploaded, bytesTotal\)/,
   "Evidence uploads must report progress to the user.",

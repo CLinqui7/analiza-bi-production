@@ -15,6 +15,7 @@ import {
   type ComponentProps,
   type FocusEvent,
   type MouseEvent,
+  type PointerEvent,
   type ReactNode,
 } from "react";
 
@@ -244,6 +245,7 @@ export function NavigationLink({
   onClick,
   onFocus,
   onMouseEnter,
+  onPointerDown,
   pendingLabel,
   target,
   ...props
@@ -271,6 +273,18 @@ export function NavigationLink({
     navigation?.prefetch(href);
   }
 
+  function handlePointerDown(event: PointerEvent<HTMLAnchorElement>) {
+    onPointerDown?.(event);
+
+    if (
+      !isModifiedNavigation(event) &&
+      (!target || target === "_self") &&
+      navigation
+    ) {
+      navigation.beginNavigation(href);
+    }
+  }
+
   function handleFocus(event: FocusEvent<HTMLAnchorElement>) {
     onFocus?.(event);
     navigation?.prefetch(href);
@@ -283,6 +297,7 @@ export function NavigationLink({
       className={cn(
         "transition-[opacity,filter] duration-100",
         className,
+        "active:opacity-70 active:saturate-50",
         isIntentPending && "cursor-progress opacity-70 saturate-50",
       )}
       data-navigation-link="true"
@@ -292,6 +307,7 @@ export function NavigationLink({
       onClick={handleClick}
       onFocus={handleFocus}
       onMouseEnter={handleMouseEnter}
+      onPointerDown={handlePointerDown}
       prefetch={shouldPrefetch}
       target={target}
     >
