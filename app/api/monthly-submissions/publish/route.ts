@@ -6,7 +6,9 @@ import {
   type AttachmentKpiSource,
 } from "@/lib/analytics/official-kpi-engine";
 import {
+  isSupportedMonthlyFormContractVersion,
   resolveFormBusinessLine,
+  savedMonthlyFormContractVersion,
   validateMonthlyFormContract,
 } from "@/lib/monthly-form-contract";
 import { assertRecordAccess } from "@/lib/v7/security/authorization-policy";
@@ -124,6 +126,10 @@ export async function POST(request: Request) {
   const line = lineData as BusinessLine;
   const formLine = resolveFormBusinessLine(line);
   if (!formLine) return NextResponse.json({ error: "UNSUPPORTED_BUSINESS_LINE" }, { status: 422 });
+  const formContractVersion = savedMonthlyFormContractVersion(formLine, version.responses);
+  if (!isSupportedMonthlyFormContractVersion(formLine, formContractVersion)) {
+    return NextResponse.json({ error: "UNSUPPORTED_FORM_CONTRACT_VERSION" }, { status: 409 });
+  }
 
   if (!String(version.responses.area_manager_name ?? "").trim()) {
     return NextResponse.json({
@@ -132,7 +138,12 @@ export async function POST(request: Request) {
     }, { status: 409 });
   }
 
-  const contract = validateMonthlyFormContract({ line: formLine, responses: version.responses, requireComplete: true });
+  const contract = validateMonthlyFormContract({
+    line: formLine,
+    responses: version.responses,
+    requireComplete: true,
+    contractVersion: formContractVersion,
+  });
   if (contract.missing.length > 0 || contract.invalid.length > 0) {
     return NextResponse.json({
       error: "INCOMPLETE_MONTHLY_FORM",
@@ -284,6 +295,7 @@ export async function POST(request: Request) {
     closing_version_id: closing.id,
     calculated_kpis: calculated.map((item) => item.code),
     attachment_ids: validAttachments.map((item) => item.id),
+    form_contract_version: formContractVersion,
   };
   await supabase.from("manual_monthly_submission_events").insert({
     submission_id: submission.id,
@@ -306,6 +318,7 @@ export async function POST(request: Request) {
       source_version_id: version.id,
       kpi_count: calculated.length,
       attachment_count: validAttachments.length,
+      form_contract_version: formContractVersion,
     },
   });
 

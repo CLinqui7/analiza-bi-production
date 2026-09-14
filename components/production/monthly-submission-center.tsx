@@ -25,9 +25,12 @@ import { Label } from "@/components/ui/label";
 import type { ImportBusinessLine, ManualMonthlyFormField } from "@/lib/analytics/import-operations";
 import {
   countRequiredCompletion,
+  currentMonthlyFormContractVersion,
   getMonthlyFormFields,
   getMonthlyFormSteps,
+  MONTHLY_FORM_CONTRACT_RESPONSE_KEY,
   resolveFormBusinessLine,
+  savedMonthlyFormContractVersion,
 } from "@/lib/monthly-form-contract";
 import {
   copyMonthlyDraft,
@@ -41,6 +44,7 @@ import type { TenantContextOptions } from "@/lib/v7/server/tenant-context";
 
 const acceptedFiles = ".xlsx,.xls,.csv,.pdf,.doc,.docx,.ppt,.pptx,.txt,.png,.jpg,.jpeg";
 const maxFileBytes = 15 * 1024 * 1024;
+const maxImportFileBytes = 4 * 1024 * 1024;
 
 function resumableStorageEndpoint(baseUrl: string) {
   const normalizedBaseUrl = baseUrl.replace(/\/$/, "");
@@ -171,6 +175,33 @@ type Attachment = {
   extracted_summary: AttachmentSummary;
   warning_codes: string[];
   created_at: string;
+};
+type WorkbookImportPreview = {
+  status: "ready" | "blocked";
+  contractVersion: string;
+  sourceFileName: string;
+  sourceFileSha256: string;
+  sourceSheet: string;
+  detectedPeriod: string | null;
+  detectedBranch: string | null;
+  matchedColumn: string | null;
+  values: Record<string, string | number>;
+  recognizedCount: number;
+  blankFieldIds: string[];
+  conflicts: string[];
+  formulaFieldIds: string[];
+  unresolvedSourceLabels: string[];
+  persisted: false;
+  error?: string;
+  message?: string;
+};
+type WorkbookImportTrace = {
+  contractVersion: string;
+  sourceFileName: string;
+  sourceFileSha256: string;
+  sourceSheet: string;
+  recognizedCount: number;
+  formulaFieldCount: number;
 };
 type RecentSubmission = {
   id: string;
@@ -437,35 +468,46 @@ export function MonthlySubmissionCenter({
   const [dirty, setDirty] = useState(true);
   const [currentStep, setCurrentStep] = useState(0);
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [importPreview, setImportPreview] = useState<WorkbookImportPreview | null>(null);
+  const [importTrace, setImportTrace] = useState<WorkbookImportTrace | null>(null);
   const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [recent, setRecent] = useState<RecentSubmission[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
-  const [busy, setBusy] = useState<"save" | "publish" | "upload" | "delete" | "open" | "report" | null>(null);
+  const [busy, setBusy] = useState<"save" | "publish" | "upload" | "import" | "delete" | "open" | "report" | null>(null);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [blockers, setBlockers] = useState<string[]>([]);
   const contextRevisionRef = useRef(0);
   const busyOperationRef = useRef(0);
   const activeContextKeyRef = useRef(monthlyDraftKey(assignments[0]?.id ?? "", options.reportingMonths[0]?.id ?? monthValue()));
-  const draftsRef = useRef(new Map<string, MonthlyFormDraft<SavedSubmission, Attachment>>());
+  const draftsRef = useRef(new Map<string, MonthlyFormDraft<SavedSubmission, Attachment, WorkbookImportTrace>>());
 
   const selectedBranch = selectedAssignment?.branch ?? null;
   const selectedBranchManager = selectedAssignment?.branchManager ?? null;
   const selectedAreaManager = selectedAssignment?.areaManager ?? null;
   const selectedLineOption = selectedAssignment?.businessLine ?? null;
   const formLine: ImportBusinessLine | null = selectedLineOption ? resolveFormBusinessLine(selectedLineOption) : null;
+  const storedContractVersion = values[MONTHLY_FORM_CONTRACT_RESPONSE_KEY]?.trim() || undefined;
+  const formContractVersion = formLine
+    ? saved
+      ? savedMonthlyFormContractVersion(formLine, values)
+      : storedContractVersion ?? currentMonthlyFormContractVersion(formLine)
+    : undefined;
   const steps = useMemo(() => {
     if (!formLine) return [];
 
-    return getMonthlyFormSteps(formLine)
+    return getMonthlyFormSteps(formLine, formContractVersion)
       .map((candidate) => {
         const visibleFields = candidate.fields.filter((field) => field.inputType !== "file");
         return { ...candidate, fields: visibleFields };
       })
       .filter((candidate) => candidate.fields.length > 0);
-  }, [formLine]);
-  const allFields = useMemo(() => formLine ? getMonthlyFormFields(formLine) : [], [formLine]);
+  }, [formContractVersion, formLine]);
+  const allFields = useMemo(
+    () => formLine ? getMonthlyFormFields(formLine, formContractVersion) : [],
+    [formContractVersion, formLine],
+  );
   const finalStepIndex = steps.length;
   const isFinalStep = currentStep === finalStepIndex;
   const period = monthBounds(periodMonth);
@@ -499,8 +541,8 @@ export function MonthlySubmissionCenter({
   }, [allFields, contextResponses, values]);
 
   const completion = useMemo(
-    () => formLine ? countRequiredCompletion(formLine, responses) : { completed: 0, total: 0 },
-    [formLine, responses],
+    () => formLine ? countRequiredCompletion(formLine, responses, formContractVersion) : { completed: 0, total: 0 },
+    [formContractVersion, formLine, responses],
   );
   const completionPct = completion.total ? Math.round((completion.completed / completion.total) * 100) : 0;
   const currentVersionPublished = saved?.status === "published";
@@ -546,6 +588,7 @@ export function MonthlySubmissionCenter({
       changeReason,
       currentStep,
       dirty,
+      importTrace,
       saved,
       values,
       warnings,
@@ -556,12 +599,13 @@ export function MonthlySubmissionCenter({
     draftsRef.current.set(activeContextKeyRef.current, activeDraft());
   }
 
-  function applyDraft(draft: MonthlyFormDraft<SavedSubmission, Attachment>) {
+  function applyDraft(draft: MonthlyFormDraft<SavedSubmission, Attachment, WorkbookImportTrace>) {
     setAttachments(draft.attachments);
     setBlockers(draft.blockers);
     setChangeReason(draft.changeReason);
     setCurrentStep(draft.currentStep);
     setDirty(draft.dirty);
+    setImportTrace(draft.importTrace);
     setSaved(draft.saved);
     setValues(draft.values);
     setWarnings(draft.warnings);
@@ -573,6 +617,7 @@ export function MonthlySubmissionCenter({
     activeContextKeyRef.current = nextContextKey;
     setBusy(null);
     setUploadProgress(null);
+    setImportPreview(null);
     setMessage(null);
   }
 
@@ -593,7 +638,7 @@ export function MonthlySubmissionCenter({
     markContextChange(nextKey);
     applyDraft(copyMonthlyDraft(
       draftsRef.current.get(nextKey)
-      ?? emptyMonthlyDraft<SavedSubmission, Attachment>(changeReasonOptions[0]!),
+      ?? emptyMonthlyDraft<SavedSubmission, Attachment, WorkbookImportTrace>(changeReasonOptions[0]!),
     ));
   }
 
@@ -674,6 +719,7 @@ export function MonthlySubmissionCenter({
         Object.entries(body.version.responses ?? {}).map(([key, value]) => [key, value === null || value === undefined ? "" : String(value)]),
       );
       setValues(loadedResponses);
+      setImportTrace(null);
       setChangeReason(body.version.change_reason ?? changeReasonOptions[0]!);
       setSaved({ submissionId: body.submission.id, versionId: body.version.id, versionNumber: body.version.version_number, status: body.version.status });
       setDirty(false);
@@ -718,6 +764,8 @@ export function MonthlySubmissionCenter({
           periodStart: period.start,
           periodEnd: period.end,
           responses,
+          formContractVersion,
+          importTrace: importTrace ?? undefined,
           changeReason: changeReason || undefined,
         }),
       });
@@ -804,6 +852,71 @@ export function MonthlySubmissionCenter({
     } catch (error) {
       throw new Error(resumableUploadErrorMessage(error));
     }
+  }
+
+  async function dryRunWorkbookImport(file: File | null) {
+    if (!file || !formLine || !["Fisioterapia", "Imagenes"].includes(formLine)) return;
+    if (file.size <= 0 || file.size > maxImportFileBytes) {
+      setMessage({ type: "error", text: "El Excel de respuestas debe pesar entre 1 byte y 4 MB." });
+      return;
+    }
+    if (!/\.xlsx$/i.test(file.name)) {
+      setMessage({ type: "error", text: "La importación de respuestas acepta únicamente .xlsx." });
+      return;
+    }
+    const operationId = beginBusy("import");
+    const requestContextKey = activeContextKeyRef.current;
+    const requestRevision = contextRevisionRef.current;
+    setImportPreview(null);
+    setMessage(null);
+    try {
+      const body = new FormData();
+      body.set("file", file);
+      body.set("branchId", branchId);
+      body.set("businessLineId", businessLineId);
+      body.set("period", periodMonth);
+      const response = await fetch("/api/monthly-imports/dry-run", { method: "POST", body });
+      const result = (await response.json()) as WorkbookImportPreview;
+      if (!response.ok) throw new Error(result.message ?? result.error ?? "No se pudo revisar el Excel.");
+      if (!shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) return;
+      setImportPreview(result);
+      setMessage(result.status === "ready"
+        ? { type: "ok", text: `Vista previa lista: ${result.recognizedCount} respuestas reconocidas. Aún no se guardó nada.` }
+        : { type: "error", text: "El Excel no coincide con la sucursal o el periodo seleccionados. No se aplicó ningún dato." });
+    } catch (error) {
+      if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, requestContextKey, requestRevision)) {
+        setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo revisar el Excel." });
+      }
+    } finally {
+      clearBusy(operationId);
+    }
+  }
+
+  function applyWorkbookImport() {
+    if (!importPreview || importPreview.status !== "ready" || importPreview.recognizedCount === 0) return;
+    const allowedFieldIds = new Set(allFields.map((field) => field.id));
+    const importedValues = Object.fromEntries(
+      Object.entries(importPreview.values)
+        .filter(([fieldId]) => allowedFieldIds.has(fieldId))
+        .map(([fieldId, value]) => [fieldId, String(value)]),
+    );
+    contextRevisionRef.current += 1;
+    setValues((current) => ({
+      ...current,
+      [MONTHLY_FORM_CONTRACT_RESPONSE_KEY]: importPreview.contractVersion,
+      ...importedValues,
+    }));
+    setImportTrace({
+      contractVersion: importPreview.contractVersion,
+      sourceFileName: importPreview.sourceFileName,
+      sourceFileSha256: importPreview.sourceFileSha256,
+      sourceSheet: importPreview.sourceSheet,
+      recognizedCount: Object.keys(importedValues).length,
+      formulaFieldCount: importPreview.formulaFieldIds.length,
+    });
+    setDirty(true);
+    setCurrentStep(Math.min(1, Math.max(0, steps.length - 1)));
+    setMessage({ type: "ok", text: `${Object.keys(importedValues).length} respuestas se aplicaron al formulario. Revísalas y usa “Guardar borrador” para persistirlas.` });
   }
 
   async function uploadFiles(fileList: FileList | null) {
@@ -1187,6 +1300,70 @@ export function MonthlySubmissionCenter({
       )}
 
       {isFinalStep && <>
+      {(formLine === "Fisioterapia" || formLine === "Imagenes") && (
+        <Card data-testid="monthly-workbook-import">
+          <CardHeader>
+            <CardTitle>Importar respuestas desde Excel</CardTitle>
+            <CardDescription>
+              Revisa la hoja principal de la plantilla de {formLine} y prepara una vista previa. Esta acción no guarda el cierre ni reemplaza la evidencia.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4">
+            <label className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center ${busy === "import" ? "cursor-wait opacity-70" : "cursor-pointer hover:bg-muted/30"}`}>
+              {busy === "import" ? <Loader2 className="size-7 animate-spin text-primary" /> : <FileSpreadsheet className="size-7 text-primary" />}
+              <span className="mt-2 text-sm font-medium">{busy === "import" ? "Revisando estructura, periodo y sucursal…" : "Seleccionar plantilla .xlsx"}</span>
+              <span className="mt-1 text-xs text-muted-foreground">Máximo 4 MB. No ejecutamos fórmulas, no abrimos vínculos externos y no persistimos la vista previa.</span>
+              <input
+                className="sr-only"
+                data-testid="monthly-workbook-import-input"
+                disabled={busy !== null || !canWrite || currentVersionPublished}
+                type="file"
+                accept=".xlsx"
+                onChange={(event) => {
+                  void dryRunWorkbookImport(event.target.files?.[0] ?? null);
+                  event.currentTarget.value = "";
+                }}
+              />
+            </label>
+
+            {importPreview && (
+              <div className={`rounded-lg border p-4 text-sm ${importPreview.status === "ready" ? "border-emerald-200 bg-emerald-50/60" : "border-red-200 bg-red-50/60"}`}>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{importPreview.sourceFileName}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Hoja {importPreview.sourceSheet} · columna {importPreview.matchedColumn ?? "no encontrada"} · {importPreview.recognizedCount} respuestas · {importPreview.blankFieldIds.length} vacíos conservados
+                    </p>
+                  </div>
+                  <Badge variant="outline">{importPreview.persisted ? "Guardado" : "Vista previa sin guardar"}</Badge>
+                </div>
+                {importPreview.formulaFieldIds.length > 0 && (
+                  <p className="mt-3 text-xs text-amber-800">
+                    {importPreview.formulaFieldIds.length} celdas contienen fórmula: se leyó únicamente su resultado guardado; la aplicación no ejecutó ni certificó esas fórmulas.
+                  </p>
+                )}
+                {importPreview.unresolvedSourceLabels.length > 0 && (
+                  <p className="mt-2 text-xs text-amber-800">Pendiente de fuente: {importPreview.unresolvedSourceLabels.join(" · ")}</p>
+                )}
+                {importPreview.conflicts.length > 0 && (
+                  <p className="mt-2 text-xs text-red-800">Conflictos: {importPreview.conflicts.join(" · ")}</p>
+                )}
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    onClick={applyWorkbookImport}
+                    disabled={busy !== null || importPreview.status !== "ready" || importPreview.recognizedCount === 0 || !canWrite || currentVersionPublished}
+                  >
+                    Aplicar {importPreview.recognizedCount} respuestas al formulario
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => setImportPreview(null)} disabled={busy !== null}>Descartar vista previa</Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       <Card data-testid="monthly-final-evidence-step">
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">

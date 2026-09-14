@@ -2,12 +2,17 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import {
+  currentMonthlyFormContractVersion,
+  isSupportedMonthlyFormContractVersion,
+  MONTHLY_FORM_CONTRACT_RESPONSE_KEY,
   resolveFormBusinessLine,
+  savedMonthlyFormContractVersion,
   validateMonthlyFormContract,
 } from "@/lib/monthly-form-contract";
 import { assertRecordAccess } from "@/lib/v7/security/authorization-policy";
 import { actorForApi, isApiResponse } from "@/lib/v7/server/api-auth";
 import { validateMonthlyResponses } from "@/lib/server/monthly-validation";
+import { monthlyFormSourceContracts } from "@/lib/monthly-form-source-contracts";
 import { createAdminClient } from "@/lib/v7/server/admin-client";
 import { hasSupabaseAdminConfiguration } from "@/lib/v7/server/env";
 import { createClient } from "@/lib/supabase/server";
@@ -21,10 +26,20 @@ const saveSchema = z.object({
   periodStart: z.string().date(),
   periodEnd: z.string().date(),
   responses: z.record(z.string(), z.unknown()),
+  formContractVersion: z.string().max(120).optional(),
+  importTrace: z.object({
+    contractVersion: z.string().max(120),
+    sourceFileName: z.string().max(120),
+    sourceFileSha256: z.string().regex(/^[A-F0-9]{64}$/),
+    sourceSheet: z.string().max(80),
+    recognizedCount: z.number().int().min(0).max(200),
+    formulaFieldCount: z.number().int().min(0).max(200),
+  }).optional(),
   changeReason: z.string().max(500).optional(),
 });
 
 type SubmissionRow = { id: string; current_version_number: number };
+type VersionContractRow = { responses: Record<string, unknown> };
 type SubmissionScopeRow = { organization_id: string; country_id: string; company_id: string; operational_area_id: string | null; branch_id: string; business_line_id: string; period_start: string; period_end: string; status: string; is_demo: boolean };
 type BranchRow = {
   id: string;
@@ -174,7 +189,7 @@ export async function POST(request: Request) {
   if (!formLine) return NextResponse.json({ error: "UNSUPPORTED_BUSINESS_LINE" }, { status: 422 });
 
   const catalogClient = hasSupabaseAdminConfiguration() ? createAdminClient() : supabase;
-  const [actorProfileResult, areaResult] = await Promise.all([
+  const [actorProfileResult, areaResult, existingSubmissionResult] = await Promise.all([
     catalogClient
       .from("profiles")
       .select("display_name")
@@ -183,7 +198,20 @@ export async function POST(request: Request) {
     branch.operational_area_id
       ? catalogClient.from("operational_areas").select("manager_profile_id").eq("id", branch.operational_area_id).maybeSingle()
       : Promise.resolve({ data: null, error: null }),
+    supabase
+      .from("manual_monthly_submissions")
+      .select("id,current_version_number")
+      .eq("organization_id", actor.scope.organizationId)
+      .eq("branch_id", input.branchId)
+      .eq("business_line_id", input.businessLineId)
+      .eq("period_start", input.periodStart)
+      .eq("period_end", input.periodEnd)
+      .maybeSingle(),
   ]);
+  if (existingSubmissionResult.error) {
+    return NextResponse.json({ error: existingSubmissionResult.error.message }, { status: 400 });
+  }
+  const existingSubmission = (existingSubmissionResult.data ?? null) as SubmissionRow | null;
   const actorProfile = (actorProfileResult.data ?? null) as ProfileRow | null;
   const areaRow = (areaResult.data ?? null) as AreaRow | null;
   const areaManagerResult = areaRow?.manager_profile_id
@@ -193,6 +221,49 @@ export async function POST(request: Request) {
 
   const resolvedBranchManager = actorProfile?.display_name ?? actor.displayName;
   const resolvedAreaManager = areaManager?.display_name ?? "";
+  let existingContractVersion: string | null = null;
+  if (existingSubmission && existingSubmission.current_version_number > 0) {
+    const { data: currentVersionData, error: currentVersionError } = await supabase
+      .from("manual_monthly_submission_versions")
+      .select("responses")
+      .eq("submission_id", existingSubmission.id)
+      .eq("version_number", existingSubmission.current_version_number)
+      .maybeSingle();
+    if (currentVersionError || !currentVersionData) {
+      return NextResponse.json({ error: "CURRENT_FORM_CONTRACT_NOT_FOUND" }, { status: 409 });
+    }
+    existingContractVersion = savedMonthlyFormContractVersion(
+      formLine,
+      (currentVersionData as VersionContractRow).responses,
+    );
+  }
+  const formContractVersion = input.formContractVersion
+    ?? existingContractVersion
+    ?? currentMonthlyFormContractVersion(formLine);
+  if (!isSupportedMonthlyFormContractVersion(formLine, formContractVersion)) {
+    return NextResponse.json({ error: "UNSUPPORTED_FORM_CONTRACT_VERSION" }, { status: 409 });
+  }
+  if (existingContractVersion && existingContractVersion !== formContractVersion) {
+    return NextResponse.json({ error: "FORM_CONTRACT_VERSION_MISMATCH" }, { status: 409 });
+  }
+  const sourceContract = formLine === "Fisioterapia" || formLine === "Imagenes"
+    ? monthlyFormSourceContracts[formLine]
+    : null;
+  if (input.importTrace && (
+    !sourceContract
+    || input.importTrace.contractVersion !== formContractVersion
+    || input.importTrace.sourceSheet !== sourceContract.sheet
+  )) {
+    return NextResponse.json({ error: "IMPORT_TRACE_CONTRACT_MISMATCH" }, { status: 409 });
+  }
+  const importTrace = input.importTrace ? {
+    ...input.importTrace,
+    sourceFileName: input.importTrace.sourceFileName
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-zA-Z0-9._-]+/g, "-")
+      .slice(0, 120),
+  } : null;
 
   // Scope, managers, zone and dates are always rewritten from trusted catalogs.
   const responseWithServerContext: Record<string, unknown> = {
@@ -204,11 +275,13 @@ export async function POST(request: Request) {
     area_zone: branch.city ?? "",
     data_cutoff_date: input.periodEnd,
     load_deadline_date: loadDeadline(input.periodStart),
+    [MONTHLY_FORM_CONTRACT_RESPONSE_KEY]: formContractVersion,
   };
   const contract = validateMonthlyFormContract({
     line: formLine,
     responses: responseWithServerContext,
     requireComplete: false,
+    contractVersion: formContractVersion,
   });
   if (contract.invalid.length > 0) {
     return NextResponse.json({
@@ -223,6 +296,7 @@ export async function POST(request: Request) {
     line: formLine,
     responses: responseWithServerContext,
     requireComplete: true,
+    contractVersion: formContractVersion,
   });
   const draftValidation = {
     ...validation,
@@ -236,18 +310,6 @@ export async function POST(request: Request) {
   // required answers, evidence and approval) are recorded on the version and
   // enforced only by the publication endpoint.  Invalid payloads and invalid
   // field formats have already been rejected above.
-
-  const { data: existingSubmission, error: submissionError } = await supabase
-    .from("manual_monthly_submissions")
-    .select("id,current_version_number")
-    .eq("organization_id", actor.scope.organizationId)
-    .eq("branch_id", input.branchId)
-    .eq("business_line_id", input.businessLineId)
-    .eq("period_start", input.periodStart)
-    .eq("period_end", input.periodEnd)
-    .maybeSingle();
-
-  if (submissionError) return NextResponse.json({ error: submissionError.message }, { status: 400 });
 
   let submissionData = existingSubmission;
 
@@ -286,6 +348,7 @@ export async function POST(request: Request) {
         blockers: draftValidation.blockers,
         warnings: draftValidation.warnings,
         form_contract_invalid: contract.invalid,
+        import_source: importTrace,
       },
       quality_score: null,
       status: "draft",
@@ -305,7 +368,7 @@ export async function POST(request: Request) {
     submission_version_id: version.id,
     event_type: nextVersion === 1 ? "created" : "saved",
     actor_id: actor.userId,
-    details: { warnings: draftValidation.warnings, blockers: draftValidation.blockers, form_line: formLine },
+    details: { warnings: draftValidation.warnings, blockers: draftValidation.blockers, form_line: formLine, form_contract_version: formContractVersion, import_source: importTrace },
   });
   await supabase.from("audit_logs").insert({
     organization_id: actor.scope.organizationId,
@@ -316,7 +379,7 @@ export async function POST(request: Request) {
     country_id: input.countryId,
     company_id: input.companyId,
     branch_id: input.branchId,
-    metadata: { version: nextVersion, form_line: formLine },
+    metadata: { version: nextVersion, form_line: formLine, form_contract_version: formContractVersion, imported_response_count: importTrace?.recognizedCount ?? 0 },
   });
 
   return NextResponse.json({

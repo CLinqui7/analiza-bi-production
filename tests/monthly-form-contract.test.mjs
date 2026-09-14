@@ -44,24 +44,47 @@ assert.notDeepEqual(
   "Fisioterapia and Imagenes must render distinct monthly form stages.",
 );
 assert.ok(
-  physiotherapyTitles.includes("Agenda y sesiones terapeuticas"),
-  "Fisioterapia must identify its therapeutic workflow.",
+  physiotherapyTitles.includes("Uso de equipos"),
+  "Fisioterapia must expose its seven source-defined equipment concepts.",
 );
 assert.ok(
-  imagingTitles.includes("Agenda, estudios e informes"),
-  "Imagenes must identify its diagnostic workflow.",
+  imagingTitles.includes("Datos generales") && !imagingTitles.includes("Uso de equipos"),
+  "Imagenes must retain its own diagnostic source structure.",
 );
 assert.ok(
   laboratoryTitles.includes("Inventario"),
   "Laboratorio must retain its independent inventory workflow.",
 );
 assert.ok(
-  physiotherapyForm.flatMap((step) => step.fields).some((field) => field.label === "Pacientes en fisioterapia"),
-  "Fisioterapia commercial copy must remain line-specific.",
+  physiotherapyForm.flatMap((step) => step.fields).filter((field) => field.source?.classification !== "CONTEXT_YELLOW").length === 58,
+  "Fisioterapia must expose the 58 identifiable yellow business concepts.",
 );
 assert.ok(
-  imagingForm.flatMap((step) => step.fields).some((field) => field.label === "Pacientes con estudios realizados"),
-  "Imagenes commercial copy must remain line-specific.",
+  imagingForm.flatMap((step) => step.fields).filter((field) => field.source?.classification !== "CONTEXT_YELLOW").length === 44,
+  "Imagenes must expose the 44 identifiable yellow business concepts.",
+);
+assert.equal(
+  physiotherapyForm.flatMap((step) => step.fields).filter((field) => field.source?.hiddenRow).length,
+  2,
+  "The two hidden but identifiable Physiotherapy concepts must remain visible in the contract.",
+);
+assert.equal(
+  imagingForm.flatMap((step) => step.fields).filter((field) => field.source?.hiddenRow).length,
+  8,
+  "The eight hidden but identifiable Imaging concepts must remain visible in the contract.",
+);
+assert.deepEqual(
+  physiotherapyForm.flatMap((step) => step.fields).find((field) => field.id === "physio_internship_staff_count")?.source?.aliases,
+  ["Pasantia", "Pasantias"],
+  "Pasantia/Pasantias must be an explicit source alias rather than a fuzzy match.",
+);
+assert.ok(
+  physiotherapyForm.flatMap((step) => step.fields).every((field) => !field.id.startsWith("imaging_")),
+  "Physiotherapy must not receive Imaging questions.",
+);
+assert.ok(
+  imagingForm.flatMap((step) => step.fields).every((field) => !field.id.startsWith("physio_")),
+  "Imaging must not receive Physiotherapy questions.",
 );
 assert.match(form, /\.storage\.supabase\.co\/storage\/v1\/upload\/resumable/, "Resumable uploads must use the Storage host.");
 assert.match(form, /apikey: publicKey/, "Resumable uploads must include the public Supabase key.");

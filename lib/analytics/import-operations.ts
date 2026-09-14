@@ -1,3 +1,5 @@
+import { getSourceMonthlyFormStepsForLine } from "../monthly-form-source-contracts.ts";
+
 export const importBusinessLines = [
   "Consolidado",
   "Laboratorio",
@@ -134,6 +136,18 @@ export type ManualMonthlyFormField = {
   appliesTo: ImportBusinessLine[];
   min?: number;
   max?: number;
+  /**
+   * Traceability to the approved source workbook. This metadata describes the
+   * capture field; it is never used as permission to execute workbook formulas.
+   */
+  source?: {
+    labelCell: string;
+    sourceLabel: string;
+    classification: "CONTEXT_YELLOW" | "INPUT_YELLOW" | "INPUT_YELLOW_WITH_DERIVATION";
+    hiddenRow?: boolean;
+    aliases?: string[];
+    decisionIds?: string[];
+  };
 };
 
 export type ManualMonthlyFormStep = {
@@ -2334,6 +2348,15 @@ export function getConnectorsForLine(line: ImportBusinessLine | "Todas") {
 }
 
 export function getManualMonthlyFormStepsForLine(
+  line: ImportBusinessLine,
+): ManualMonthlyFormStep[] {
+  const sourceSteps = getSourceMonthlyFormStepsForLine(line);
+  if (sourceSteps) return sourceSteps;
+
+  return getLegacyManualMonthlyFormStepsForLine(line);
+}
+
+export function getLegacyManualMonthlyFormStepsForLine(
   line: ImportBusinessLine,
 ): ManualMonthlyFormStep[] {
   return manualMonthlyFormSteps

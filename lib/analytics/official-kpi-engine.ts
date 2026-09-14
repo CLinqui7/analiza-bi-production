@@ -232,6 +232,14 @@ export function calculateOfficialKpis(
   output.push(
     reportedKpi({ code: "lab_total_orders", name: "Órdenes totales de laboratorio", category: "laboratory", value: firstNumber(values, "lab_total_orders"), unit: "ordenes", field: "lab_total_orders" }),
     reportedKpi({ code: "lab_total_clients", name: "Clientes totales de laboratorio", category: "laboratory", value: firstNumber(values, "lab_total_clients"), unit: "clientes", field: "lab_total_clients" }),
+    reportedKpi({ code: "physio_sale_dd", name: "Venta D.D de fisioterapia", category: "physiotherapy", value: firstNumber(values, "physio_sale_dd"), unit: "USD", field: "physio_sale_dd" }),
+    reportedKpi({ code: "physio_target", name: "Meta reportada de fisioterapia", category: "physiotherapy", value: firstNumber(values, "physio_target"), unit: "USD", field: "physio_target" }),
+    reportedKpi({ code: "physio_total_orders", name: "Órdenes totales de fisioterapia", category: "physiotherapy", value: firstNumber(values, "physio_total_orders_count"), unit: "ordenes", field: "physio_total_orders_count" }),
+    reportedKpi({ code: "physio_therapy_sessions", name: "Sesiones totales de fisioterapia", category: "physiotherapy", value: firstNumber(values, "therapy_sessions"), unit: "sesiones", field: "therapy_sessions" }),
+    reportedKpi({ code: "imaging_sale_dd", name: "Venta D.D de imágenes", category: "imaging", value: firstNumber(values, "imaging_sale_dd"), unit: "USD", field: "imaging_sale_dd" }),
+    reportedKpi({ code: "imaging_target", name: "Meta reportada de imágenes", category: "imaging", value: firstNumber(values, "imaging_target"), unit: "USD", field: "imaging_target" }),
+    reportedKpi({ code: "imaging_total_clients", name: "Clientes totales de imágenes", category: "imaging", value: firstNumber(values, "imaging_total_clients_count"), unit: "clientes", field: "imaging_total_clients_count" }),
+    reportedKpi({ code: "imaging_rx_count", name: "Estudios RX de imágenes", category: "imaging", value: firstNumber(values, "imaging_rx_count"), unit: "estudios", field: "imaging_rx_count" }),
   );
 
   const matched = attachment?.matchedBranch ?? null;

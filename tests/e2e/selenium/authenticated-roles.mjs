@@ -1166,7 +1166,7 @@ try {
   await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 15_000);
   const incompletePublish = await driver.executeScript("return window.__qaLastPublish;");
   assert.equal(incompletePublish.status, 422, "Publishing an incomplete draft must be blocked.");
-  assert.equal(incompletePublish.body?.error, "INCOMPLETE_MONTHLY_FORM", "The publish blocker must be explicit.");
+  assert.equal(incompletePublish.body?.error, "NO_SUPPORTED_KPIS", "A source form without an approved reported KPI must fail closed.");
   await capture("gs-incomplete-blocked");
   const formStepCount = (await driver.findElements(By.css("[data-testid=monthly-form-steps] button"))).length - 1;
   for (let stepIndex = 0; stepIndex < formStepCount; stepIndex += 1) {
@@ -1197,16 +1197,16 @@ try {
   assert.ok(commercialStep, "Physiotherapy must render its production step.");
   assert.match(
     await commercialStep.getText(),
-    /Produccion terapeutica/,
-    "Physiotherapy must use its business-specific production label.",
+    /Financiero/,
+    "Physiotherapy must begin with its source-specific financial section.",
   );
   await driver.executeScript("arguments[0].scrollIntoView({ block: 'center' });", commercialStep);
   await commercialStep.click();
-  const patientsTotal = await driver.wait(until.elementLocated(By.css("#monthly-patients_total")), 10_000);
-  await patientsTotal.clear();
-  await patientsTotal.sendKeys("1");
-  await driver.executeScript("arguments[0].blur();", patientsTotal);
-  await driver.wait(async () => (await patientsTotal.getAttribute("value")) === "1", 5_000);
+  const sale = await driver.wait(until.elementLocated(By.css("#monthly-physio_sale_dd")), 10_000);
+  await sale.clear();
+  await sale.sendKeys("1");
+  await driver.executeScript("arguments[0].blur();", sale);
+  await driver.wait(async () => (await sale.getAttribute("value")) === "1", 5_000);
   await capture("gs-form-filled");
   await driver.findElement(By.css("[data-testid=monthly-final-step]")).click();
   await driver.executeScript("window.__qaLastSave = null;");
@@ -1215,7 +1215,7 @@ try {
   const secondPhysiotherapySave = await driver.executeScript("return window.__qaLastSave;");
   assert.equal(secondPhysiotherapySave.status, 201, `Physiotherapy completed draft must be versioned with HTTP 201: ${JSON.stringify(secondPhysiotherapySave.body)}`);
   const completedSave = JSON.parse(secondPhysiotherapySave.request ?? "{}");
-  assert.equal(completedSave.responses?.patients_total, 1, "The completed save must contain patients_total.");
+  assert.equal(completedSave.responses?.physio_sale_dd, 1, "The completed save must contain the source-specific Physiotherapy sale.");
   await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(monthlyEvidenceFixture);
   await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
   await driver.executeScript("window.__qaLastPublish = null;");

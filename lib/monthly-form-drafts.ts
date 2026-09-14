@@ -1,9 +1,10 @@
-export type MonthlyFormDraft<Saved, Attachment> = {
+export type MonthlyFormDraft<Saved, Attachment, ImportTrace = null> = {
   attachments: Attachment[];
   blockers: string[];
   changeReason: string;
   currentStep: number;
   dirty: boolean;
+  importTrace: ImportTrace | null;
   saved: Saved | null;
   values: Record<string, string>;
   warnings: string[];
@@ -17,13 +18,14 @@ export function hasMonthlyDraftContent(values: Record<string, string>) {
   return Object.values(values).some((value) => value.trim() !== "");
 }
 
-export function emptyMonthlyDraft<Saved, Attachment>(changeReason: string): MonthlyFormDraft<Saved, Attachment> {
+export function emptyMonthlyDraft<Saved, Attachment, ImportTrace = null>(changeReason: string): MonthlyFormDraft<Saved, Attachment, ImportTrace> {
   return {
     attachments: [],
     blockers: [],
     changeReason,
     currentStep: 0,
     dirty: true,
+    importTrace: null,
     saved: null,
     values: {},
     warnings: [],
@@ -31,7 +33,7 @@ export function emptyMonthlyDraft<Saved, Attachment>(changeReason: string): Mont
 }
 
 /** Returns a detached snapshot so a later edit cannot mutate another context. */
-export function copyMonthlyDraft<Saved, Attachment>(draft: MonthlyFormDraft<Saved, Attachment>): MonthlyFormDraft<Saved, Attachment> {
+export function copyMonthlyDraft<Saved, Attachment, ImportTrace = null>(draft: MonthlyFormDraft<Saved, Attachment, ImportTrace>): MonthlyFormDraft<Saved, Attachment, ImportTrace> {
   return {
     ...draft,
     attachments: [...draft.attachments],

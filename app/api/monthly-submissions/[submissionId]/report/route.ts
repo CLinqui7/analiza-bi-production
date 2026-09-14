@@ -1,6 +1,11 @@
 import { NextResponse } from "next/server";
 
-import { getMonthlyFormSteps, resolveFormBusinessLine } from "@/lib/monthly-form-contract";
+import {
+  getMonthlyFormSteps,
+  isSupportedMonthlyFormContractVersion,
+  resolveFormBusinessLine,
+  savedMonthlyFormContractVersion,
+} from "@/lib/monthly-form-contract";
 import { assertRecordAccess } from "@/lib/v7/security/authorization-policy";
 import { actorForApi, isApiResponse } from "@/lib/v7/server/api-auth";
 import { buildCsv, buildPdf, buildXlsx, type ExportRow } from "@/lib/server/export-builder";
@@ -125,6 +130,10 @@ export async function GET(request: Request, context: RouteContext) {
   const attachments = (attachmentResult.data ?? []) as AttachmentRow[];
   const formLine = resolveFormBusinessLine(line);
   if (!formLine) return NextResponse.json({ error: "UNSUPPORTED_BUSINESS_LINE" }, { status: 422 });
+  const formContractVersion = savedMonthlyFormContractVersion(formLine, version.responses);
+  if (!isSupportedMonthlyFormContractVersion(formLine, formContractVersion)) {
+    return NextResponse.json({ error: "UNSUPPORTED_FORM_CONTRACT_VERSION" }, { status: 409 });
+  }
 
   const rows: ExportRow[] = [
     { seccion: "Identificación", campo: "Línea", valor: line.name, unidad: "", obligatorio: "Sí" },
@@ -137,7 +146,7 @@ export async function GET(request: Request, context: RouteContext) {
     { seccion: "Identificación", campo: "Versión", valor: version.version_number, unidad: "", obligatorio: "Sí" },
   ];
 
-  for (const step of getMonthlyFormSteps(formLine)) {
+  for (const step of getMonthlyFormSteps(formLine, formContractVersion)) {
     for (const field of step.fields) {
       if (field.inputType === "file") continue;
       rows.push({

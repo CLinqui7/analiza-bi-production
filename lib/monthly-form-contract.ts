@@ -1,4 +1,5 @@
 import {
+  getLegacyManualMonthlyFormStepsForLine,
   getManualMonthlyFormStepsForLine,
   type ImportBusinessLine,
   type ManualMonthlyFormField,
@@ -9,6 +10,13 @@ import {
   isNonNegativeCountId,
   numericMonthlyValue,
 } from "@/lib/monthly-form-values";
+import {
+  getMonthlyFormContractVersion,
+  monthlyFormContractVersions,
+} from "@/lib/monthly-form-source-contracts";
+
+export const MONTHLY_FORM_CONTRACT_RESPONSE_KEY = "__form_contract_version";
+export const LEGACY_MONTHLY_FORM_CONTRACT_VERSION = "legacy-unversioned-v1";
 
 export type BusinessLineCatalogLike = {
   code?: string | null;
@@ -40,20 +48,51 @@ export function resolveFormBusinessLine(input: BusinessLineCatalogLike): ImportB
   return fromName ?? null;
 }
 
-export function getMonthlyFormSteps(line: ImportBusinessLine): ManualMonthlyFormStep[] {
+export function getMonthlyFormSteps(
+  line: ImportBusinessLine,
+  contractVersion?: string,
+): ManualMonthlyFormStep[] {
+  if (
+    contractVersion === LEGACY_MONTHLY_FORM_CONTRACT_VERSION
+    && (line === "Fisioterapia" || line === "Imagenes")
+  ) {
+    return getLegacyManualMonthlyFormStepsForLine(line);
+  }
   return getManualMonthlyFormStepsForLine(line);
 }
 
-export function getMonthlyFormFields(line: ImportBusinessLine): ManualMonthlyFormField[] {
-  return getMonthlyFormSteps(line).flatMap((step) => step.fields);
+export function getMonthlyFormFields(
+  line: ImportBusinessLine,
+  contractVersion?: string,
+): ManualMonthlyFormField[] {
+  return getMonthlyFormSteps(line, contractVersion).flatMap((step) => step.fields);
 }
 
-export function getRequiredMonthlyResponseFields(line: ImportBusinessLine) {
-  return getMonthlyFormFields(line).filter((field) => field.required && field.inputType !== "file");
+export function getRequiredMonthlyResponseFields(line: ImportBusinessLine, contractVersion?: string) {
+  return getMonthlyFormFields(line, contractVersion).filter((field) => field.required && field.inputType !== "file");
 }
 
 export function getMonthlyFileFields(line: ImportBusinessLine) {
   return getMonthlyFormFields(line).filter((field) => field.inputType === "file");
+}
+
+export function currentMonthlyFormContractVersion(line: ImportBusinessLine) {
+  return getMonthlyFormContractVersion(line);
+}
+
+export function savedMonthlyFormContractVersion(
+  line: ImportBusinessLine,
+  responses: Record<string, unknown>,
+) {
+  const stored = responses[MONTHLY_FORM_CONTRACT_RESPONSE_KEY];
+  if (typeof stored === "string" && stored.trim()) return stored.trim();
+  if (line === "Fisioterapia" || line === "Imagenes") return LEGACY_MONTHLY_FORM_CONTRACT_VERSION;
+  return monthlyFormContractVersions.Laboratorio;
+}
+
+export function isSupportedMonthlyFormContractVersion(line: ImportBusinessLine, version: string) {
+  return version === currentMonthlyFormContractVersion(line)
+    || ((line === "Fisioterapia" || line === "Imagenes") && version === LEGACY_MONTHLY_FORM_CONTRACT_VERSION);
 }
 
 function isNonNegativeCountField(field: ManualMonthlyFormField) {
@@ -74,12 +113,14 @@ export function validateMonthlyFormContract({
   line,
   responses,
   requireComplete,
+  contractVersion,
 }: {
   line: ImportBusinessLine;
   responses: Record<string, unknown>;
   requireComplete: boolean;
+  contractVersion?: string;
 }): FormContractValidation {
-  const fields = getMonthlyFormFields(line).filter((field) => field.inputType !== "file");
+  const fields = getMonthlyFormFields(line, contractVersion).filter((field) => field.inputType !== "file");
   const normalized: Record<string, unknown> = { ...responses };
   const missing: string[] = [];
   const invalid: Array<{ fieldId: string; reason: string }> = [];
@@ -123,8 +164,12 @@ export function validateMonthlyFormContract({
   return { missing, invalid, normalized };
 }
 
-export function countRequiredCompletion(line: ImportBusinessLine, responses: Record<string, unknown>) {
-  const required = getRequiredMonthlyResponseFields(line);
+export function countRequiredCompletion(
+  line: ImportBusinessLine,
+  responses: Record<string, unknown>,
+  contractVersion?: string,
+) {
+  const required = getRequiredMonthlyResponseFields(line, contractVersion);
   const completed = required.filter((field) => !isBlankMonthlyValue(responses[field.id])).length;
   return { completed, total: required.length };
 }
