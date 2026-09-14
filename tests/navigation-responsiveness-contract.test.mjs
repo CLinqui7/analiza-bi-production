@@ -22,6 +22,21 @@ assert.match(
   "The server actor must carry the directory role ID within its request.",
 );
 assert.match(
+  authorization,
+  /scopeGrants: directoryUser\.scopeGrants \?\? undefined/,
+  "The server actor must carry the complete request-resolved grant set.",
+);
+assert.match(
+  directory,
+  /const \[profile, assignments, managerAssignments\] = await Promise\.all/,
+  "Directory authorization must batch profile, role and manager-grant reads.",
+);
+assert.match(
+  apiAuth,
+  /if \(actor\.scopeGrants && actor\.scopeGrants\.length > 0\) \{\s*return base;/,
+  "Protected snapshots must reuse grants resolved by directory authorization.",
+);
+assert.match(
   apiAuth,
   /let roleId = base\.roleId/,
   "Grant resolution must reuse the request-resolved role ID.",

@@ -22,7 +22,10 @@ export function toV7Actor(
     roleKey: actor.roleKey,
     roleId: actor.roleId ?? null,
     scope: actor.scope,
-    scopeGrants: [actor.scope],
+    scopeGrants:
+      actor.scopeGrants && actor.scopeGrants.length > 0
+        ? actor.scopeGrants
+        : [actor.scope],
     isDemo: actor.source === "demo",
     permissions: [],
   };
@@ -35,6 +38,13 @@ async function resolveV7ActorFromCurrentUncached(
   const base = toV7Actor(actor);
 
   if (actor.source === "demo") {
+    return base;
+  }
+
+  // Supabase directory access already loaded both active role and manager
+  // grants in parallel for this request. Reuse that complete set instead of
+  // repeating two PostgREST reads inside every protected page snapshot.
+  if (actor.scopeGrants && actor.scopeGrants.length > 0) {
     return base;
   }
 

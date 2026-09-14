@@ -1,4 +1,5 @@
 import { getSupabaseAdminClient } from "@/lib/supabase/admin";
+import type { AuthorizationScopeGrant } from "@/lib/security/authorization-policy";
 import type { CurrentUserScope } from "@/lib/tenant/current-user-access";
 import { roleKeys, type RoleKey } from "@/lib/tenant/demo-context";
 
@@ -44,6 +45,8 @@ type ProfileRow = {
 type UserRoleRow = {
   branch?: RelatedRow<BranchRow>;
   branch_id: string | null;
+  business_line_code?: string | null;
+  business_line_id?: string | null;
   company?: RelatedRow<NamedRow>;
   company_id: string | null;
   country?: RelatedRow<NamedRow>;
@@ -62,6 +65,7 @@ export type SupabaseDirectoryUserAccess = {
   roleId: string | null;
   roleKey: RoleKey;
   scope: CurrentUserScope;
+  scopeGrants: AuthorizationScopeGrant[] | null;
   userId: string;
 };
 
@@ -116,9 +120,10 @@ async function readUserRoles(userId: string) {
   const extended = await admin
     .from("user_roles")
     .select(
-      "role_id, organization_id, country_id, company_id, branch_id, operational_area_id, status, role:roles(id,key), country:countries(id,name), company:companies(id,name), operational_area:operational_areas(id,name), branch:branches(id,name,code,city,country_id,company_id,operational_area_id,country:countries(id,name),company:companies(id,name),operational_area:operational_areas(id,name))",
+      "role_id, organization_id, country_id, company_id, branch_id, operational_area_id, business_line_id, business_line_code, status, role:roles(id,key), country:countries(id,name), company:companies(id,name), operational_area:operational_areas(id,name), branch:branches(id,name,code,city,country_id,company_id,operational_area_id,country:countries(id,name),company:companies(id,name),operational_area:operational_areas(id,name))",
     )
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .eq("status", "active");
 
   if (!extended.error) {
     // The generated Database type predates these verified PostgREST embedded
@@ -128,10 +133,69 @@ async function readUserRoles(userId: string) {
 
   const core = await admin
     .from("user_roles")
-    .select("role_id, organization_id, country_id, company_id, branch_id")
-    .eq("user_id", userId);
+    .select(
+      "role_id, organization_id, country_id, company_id, branch_id, operational_area_id, business_line_id, business_line_code, status",
+    )
+    .eq("user_id", userId)
+    .eq("status", "active");
 
   return core.error ? [] : ((core.data ?? []) as UserRoleRow[]);
+}
+
+async function readManagerAssignments(userId: string) {
+  const admin = getSupabaseAdminClient();
+
+  if (!admin) return null;
+
+  const result = await admin
+    .from("manager_assignments")
+    .select(
+      "role_id,organization_id,country_id,company_id,operational_area_id,branch_id,business_line_id,business_line_code,status",
+    )
+    .eq("profile_id", userId)
+    .eq("status", "active");
+
+  return result.error ? null : ((result.data ?? []) as UserRoleRow[]);
+}
+
+function dedupeScopeGrants(
+  assignments: UserRoleRow[],
+  roleId: string | null,
+  organizationId: string | null,
+) {
+  if (!roleId || !organizationId) return [];
+
+  return Array.from(
+    new Map(
+      assignments
+        .filter(
+          (assignment) =>
+            assignment.role_id === roleId &&
+            assignment.organization_id === organizationId &&
+            assignment.status === "active",
+        )
+        .map((assignment) => {
+          const grant: AuthorizationScopeGrant = {
+            branchId: assignment.branch_id,
+            businessLineCode: assignment.business_line_code,
+            businessLineId: assignment.business_line_id,
+            companyId: assignment.company_id,
+            countryId: assignment.country_id,
+            operationalAreaId: assignment.operational_area_id,
+            organizationId,
+          };
+          const grantKey = [
+            grant.organizationId,
+            grant.countryId,
+            grant.companyId,
+            grant.operationalAreaId,
+            grant.branchId,
+            grant.businessLineId,
+          ].join("|");
+          return [grantKey, grant] as const;
+        }),
+    ).values(),
+  );
 }
 
 async function readProfile(userId: string) {
@@ -212,9 +276,10 @@ export async function getSupabaseDirectoryUserAccess(
 
   if (!admin) return null;
 
-  const [profile, assignments] = await Promise.all([
+  const [profile, assignments, managerAssignments] = await Promise.all([
     readProfile(userId),
     readUserRoles(userId),
+    readManagerAssignments(userId),
   ]);
 
   if (!profile) {
@@ -252,6 +317,13 @@ export async function getSupabaseDirectoryUserAccess(
     (await readBranch(branchId));
   const organizationId =
     assignment?.organization_id ?? profile.organization_id ?? null;
+  const scopeGrants = managerAssignments
+    ? dedupeScopeGrants(
+        [...assignments, ...managerAssignments],
+        assignment?.role_id ?? null,
+        organizationId,
+      )
+    : null;
   const countryId =
     assignment?.country_id ??
     profile.default_country_id ??
@@ -312,6 +384,7 @@ export async function getSupabaseDirectoryUserAccess(
       organizationId,
       organizationName,
     },
+    scopeGrants,
     userId,
   };
 }

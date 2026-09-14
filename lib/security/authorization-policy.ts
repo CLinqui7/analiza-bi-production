@@ -13,6 +13,11 @@ import {
 
 export type AuthorizationActorSource = "demo" | "local" | "supabase";
 
+export type AuthorizationScopeGrant = ScopeBoundary & {
+  businessLineCode?: string | null;
+  businessLineId?: string | null;
+};
+
 export type AuthorizationActor = {
   allowDemoRoleSwitch: boolean;
   canInviteOperationalUsers?: boolean;
@@ -26,6 +31,8 @@ export type AuthorizationActor = {
   roleId?: string | null;
   roleKey: RoleKey;
   scope: ScopeBoundary;
+  /** Complete active grants resolved from the directory in this request. */
+  scopeGrants?: AuthorizationScopeGrant[];
   source: AuthorizationActorSource;
   userId: string;
 };

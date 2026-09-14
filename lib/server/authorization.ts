@@ -166,6 +166,7 @@ async function readSupabaseAuthorizationActor(): Promise<AuthorizationActor | nu
       roleId: directoryUser.roleId,
       roleKey: directoryUser.roleKey,
       scope: directoryScope,
+      scopeGrants: directoryUser.scopeGrants ?? undefined,
       source: "supabase",
       userId,
     };
