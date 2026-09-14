@@ -775,6 +775,12 @@ export function MonthlySubmissionCenter({
         return;
       }
       const savedVersion = { submissionId: body.submissionId, versionId: body.version.id, versionNumber: body.version.version_number, status: body.version.status };
+      if (formContractVersion) {
+        setValues((current) => ({
+          ...current,
+          [MONTHLY_FORM_CONTRACT_RESPONSE_KEY]: formContractVersion,
+        }));
+      }
       if (contextRevision !== contextRevisionRef.current) {
         setSaved(savedVersion);
         setDirty(true);

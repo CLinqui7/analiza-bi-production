@@ -89,6 +89,11 @@ assert.ok(
 assert.match(form, /\.storage\.supabase\.co\/storage\/v1\/upload\/resumable/, "Resumable uploads must use the Storage host.");
 assert.match(form, /apikey: publicKey/, "Resumable uploads must include the public Supabase key.");
 assert.match(form, /Guarda el borrador antes de adjuntar el Excel/, "An unavailable uploader must explain how to proceed.");
+assert.match(
+  form,
+  /const savedVersion[\s\S]*\[MONTHLY_FORM_CONTRACT_RESPONSE_KEY\]: formContractVersion/,
+  "A successful save must retain the resolved contract version instead of falling back to a legacy form.",
+);
 
 const assignmentA = monthlyDraftKey("branch-a:line-lab", "2026-09");
 const assignmentB = monthlyDraftKey("branch-b:line-physio", "2026-09");
