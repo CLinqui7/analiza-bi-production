@@ -67,3 +67,7 @@ La comparación remota de solo lectura produjo:
 Las cinco filas pendientes son 17 y 59 (`ACTIVE_ASSIGNMENT_MISSING`) y 47, 48 y 60 (`PROFILE_EMAIL_MISSING`). En la identidad especial de `andrea.rivera@labanaliza.com` existe una asignación activa de Gerente de Sucursal en una sola línea; no se amplió su rol ni se creó otra persona por el nombre discordante.
 
 Antes de aplicar el directorio se necesita aprobación explícita para decidir si las dos asignaciones productivas ausentes del archivo se conservan, y para crear/resolver perfiles y asignaciones de las cinco filas pendientes. Los bonos no forman parte de esta operación.
+
+## Empaquetado Vercel
+
+El proyecto compartido tenía configurada una salida monorepo `apps/web/.next`, incompatible con este repositorio de raíz única. `vercel.json` fija para este código el preset Next.js y su salida predeterminada mediante `outputDirectory: null`; el ajuste queda acotado al repositorio y no cambia la configuración utilizada por otros repositorios vinculados al mismo proyecto Vercel.
