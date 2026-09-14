@@ -16,7 +16,7 @@ Huellas autorizadas:
 
 - Fisioterapia: `7B21A90417B094684690BA075F6406D2DEA93FEA5BF97A75EF534AAA385FA759`.
 - Imágenes: `B2A8FB5806E7D6998877CF3297CE56734070FBD5F16A305A30517A5D1DEADFC0`.
-- Directorio: `9761F3E2E63677C9A69CEE90A54335D87E30E8D5A96F7FF94B47834CFA8C301F`.
+- Directorio: `510918238DC03BF7F7DF0ABA1DDA3A9C2EB130C79C48F7B028E891BD02F06B32`.
 
 El color `theme7` se resuelve como `#FFC000`. Solo las etiquetas amarillas de columna A de las hojas principales forman el contrato; no se promovieron pivotes, pacientes ni hojas auxiliares a preguntas.
 
@@ -51,22 +51,20 @@ Solo se publican como KPI los valores agregados reportados que tienen un campo c
 | FORM-06 | Definir unidad de los siete equipos. | Unidad declarada pendiente. |
 | CALC-01 a CALC-07 | Resolver margen de Imágenes, pagos inconsistentes, divisores diarios, datos sin fuente, variaciones rotas, facturas y desfase de personal. | No se publican esas fórmulas ni se convierten errores en cero. |
 
-## Directorio: conciliación de solo lectura
+## Directorio: conciliación aplicada
 
-No se modificaron usuarios, permisos, asignaciones ni bonos. La fuente contiene 59 asignaciones, 50 correos normalizados, 9 correos con dos sucursales y 14 filas con bono cero.
+La fuente contiene 59 asignaciones y 50 correos normalizados. Por autorización del propietario, `Infogeneral_!C59` se corrigió sustituyendo únicamente una `í` por `i`; la comparación de las tres hojas confirmó una sola celda distinta, cero fórmulas o rangos alterados y el mismo estilo. La huella nueva aparece arriba.
 
-La comparación remota de solo lectura produjo:
+| Medida | Antes | Después |
+|---|---:|---:|
+| Coincidencias exactas fuente/producción | 54 | 59 |
+| Filas de fuente sin coincidencia exacta | 5 | 0 |
+| Asignaciones productivas de los países de la fuente ausentes en el archivo | 2 | 2, conservadas |
+| Correos de fuente sin perfil productivo | 3 | 0 |
 
-| Medida | Resultado |
-|---|---:|
-| Coincidencias exactas fuente/producción | 54 |
-| Filas de fuente sin coincidencia exacta | 5 |
-| Asignaciones productivas de los países de la fuente ausentes en el archivo | 2 |
-| Correos de fuente sin perfil productivo | 3 |
+Se reconciliaron las filas 17, 47, 48, 59 y 60 con una sola identidad exacta por correo y una sola asignación/rol activos por sucursal y línea. La fila 59 reutilizó la cuenta productiva que coincidió después de la corrección autorizada. Para la fila 60 se creó el catálogo faltante de sucursal y su slot; las identidades nuevas recibieron invitación y sus grants de país, empresa y sucursal. No se desactivaron las dos asignaciones productivas que no aparecen en la fuente.
 
-Las cinco filas pendientes son 17 y 59 (`ACTIVE_ASSIGNMENT_MISSING`) y 47, 48 y 60 (`PROFILE_EMAIL_MISSING`). En la identidad especial de `andrea.rivera@labanaliza.com` existe una asignación activa de Gerente de Sucursal en una sola línea; no se amplió su rol ni se creó otra persona por el nombre discordante.
-
-Antes de aplicar el directorio se necesita aprobación explícita para decidir si las dos asignaciones productivas ausentes del archivo se conservan, y para crear/resolver perfiles y asignaciones de las cinco filas pendientes. Los bonos no forman parte de esta operación.
+Los 68 planes de bono conservaron la huella `b6578e87dd5b37f413adf5e773a7b2ccb485ce007dd5375455360850ab035e6e`. La identidad especial de `andrea.rivera@labanaliza.com` conserva una sola asignación activa de Gerente de Sucursal en una sola línea; no se amplió su alcance por coincidencia de nombre.
 
 ## Empaquetado Vercel
 

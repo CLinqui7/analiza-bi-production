@@ -67,14 +67,22 @@ const multiBranchProfileIds = [...branchAssignmentsByProfile.entries()]
 const authUserIds = new Set((authUsers?.users ?? []).map((user) => user.id));
 const activeManagerRoleId = [...roleById.entries()].find(([, key]) => key === "gerente_sucursal")?.[0];
 const expectedIdentityAssignments = [
-  ["felipe.duran@labanaliza.com", "Sta Ana - Santa Ana 2 - L013"],
-  ["andrea.rivera@labanaliza.com", "Sta Ana - Santa Ana 2 Fisioterapia"],
+  ["felipe.duran@labanaliza.com", "Sta Ana - Santa Ana 2 - L013", "LABORATORY"],
+  ["andrea.rivera@labanaliza.com", "Sta Ana - Santa Ana 2 Fisioterapia", "PHYSIOTHERAPY"],
 ];
-for (const [email, branchName] of expectedIdentityAssignments) {
+for (const [email, branchName, businessLineCode] of expectedIdentityAssignments) {
   const profile = profilesByEmail.get(email);
   assert.ok(profile, "DIRECTORY_EMAIL_IDENTITY_MISSING");
   const assignments = branchAssignmentsByProfile.get(profile.id) ?? [];
-  assert.equal(assignments.filter((assignment) => branchNameById.get(assignment.branch_id) === branchName).length, 1, "DIRECTORY_EMAIL_IDENTITY_CROSSED");
+  assert.equal(
+    assignments.filter(
+      (assignment) =>
+        branchNameById.get(assignment.branch_id) === branchName &&
+        lineById.get(assignment.business_line_id) === businessLineCode,
+    ).length,
+    1,
+    "DIRECTORY_EMAIL_IDENTITY_CROSSED",
+  );
 }
 assert.notEqual(
   profilesByEmail.get("felipe.duran@labanaliza.com")?.id,
@@ -104,14 +112,14 @@ const metrics = {
   multiBranchManagers: multiBranchProfileIds.length,
 };
 
-assert.equal(metrics.assignmentSlots, 95, "DIRECTORY_ASSIGNMENT_SLOTS_INVALID");
-assert.equal(metrics.es, 60, "DIRECTORY_ES_INVALID");
+assert.equal(metrics.assignmentSlots, 96, "DIRECTORY_ASSIGNMENT_SLOTS_INVALID");
+assert.equal(metrics.es, 61, "DIRECTORY_ES_INVALID");
 assert.equal(metrics.hn, 35, "DIRECTORY_HN_INVALID");
-assert.equal(metrics.laboratory, 76, "DIRECTORY_LAB_INVALID");
+assert.equal(metrics.laboratory, 77, "DIRECTORY_LAB_INVALID");
 assert.equal(metrics.imaging, 12, "DIRECTORY_IMG_INVALID");
 assert.equal(metrics.physiotherapy, 7, "DIRECTORY_FISIO_INVALID");
 assert.equal(metrics.areaManagers, 13, "DIRECTORY_GA_INVALID");
-assert.equal(metrics.branchManagers, 72, "DIRECTORY_GS_INVALID");
+assert.equal(metrics.branchManagers, 75, "DIRECTORY_GS_INVALID");
 assert.equal(metrics.vacancies, 11, "DIRECTORY_VACANCIES_INVALID");
 assert.equal(metrics.duplicateBranchLine, 0, "DIRECTORY_DUPLICATE_BRANCH_LINE");
 assert.equal(metrics.crossCountry, 0, "DIRECTORY_CROSS_COUNTRY");

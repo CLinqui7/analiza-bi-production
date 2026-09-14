@@ -161,3 +161,22 @@ Antes del cambio, las tres muestras de Metas fueron 1838, 5966 y 2365 ms a conte
 ### Verificación funcional con un XLSX real
 
 La regresión autenticada se repitió contra el alias productivo usando un archivo `.xlsx` real de 4 KB, generado sin fórmulas y únicamente con valores `DEMO`/QA. Fisioterapia, Laboratorio e Imágenes guardaron el borrador, finalizaron la carga, publicaron el cierre y mostraron el resultado oficial y el historial correspondiente. La interfaz confirmó el nombre del adjunto; el valor cero del archivo se conservó. El mismo recorrido volvió a verificar la paridad autorizada de Gerente de Operaciones con CEO y terminó con `authenticatedRoles: PASS` y `qaCleanup: PASS`. La prueba admite ahora una ruta de evidencia configurable para cubrir tanto CSV como XLSX sin incorporar archivos temporales al repositorio.
+
+## Cuarta optimización: feedback de puntero y grants por petición (2026-09-14)
+
+El código `39112ca` quedó publicado como `dpl_FvaqaWYybTQhz8mhwwBVS5wAcAiS` en IAD1 y el alias `https://web-clinqui7s-projects.vercel.app` apunta a ese artefacto. El deployment anterior `dpl_4WwMJxTJpunfuadqRhJCxoaGgNR5` permanece disponible por su URL inmutable para rollback.
+
+El enlace protegido activa su estado visual en `pointerdown`, antes de que termine el evento `click`, y conserva `click` para navegación por teclado. La precarga no aumentó. El runner separa ahora tiempo desde la orden de Playwright y tiempo desde el evento real del puntero; así no atribuye al navegador ni a React el retardo de despacho de la automatización.
+
+La autorización inicial ya leía `user_roles`. El snapshot posterior repetía esa consulta y agregaba otra lectura de `manager_assignments`. Ahora perfil, roles activos y asignaciones activas se leen en paralelo una sola vez y el conjunto completo se reutiliza únicamente dentro de la misma petición. Si la lectura adicional falla, el código conserva el camino compatible anterior. No existe caché pública ni caché de permisos entre peticiones; revocaciones, estados y cambios de rol se vuelven a leer en la siguiente solicitud.
+
+| Ruta | Escenario A | Orden → feedback (ms) | Contenido final (ms) | Usable (ms) | `actor_grants` | Muestras |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| Formulario | no visitada, sin precarga | 93, 63, 81 | 813, 818, 836 | 1051, 1021, 1038 | 0, 0, 0 | 3 |
+| Historial | no visitada, sin precarga | 65, 61, 59 | 836, 835, 842 | 854, 855, 859 | 0, 0, 0 | 3 |
+| Resultados | no visitada, sin precarga | 66, 71, 51 | 839, 821, 828 | 857, 867, 846 | 0, 0, 0 | 3 |
+| Metas | no visitada, sin precarga | 104, 61, 73 | 847, 835, 867 | 868, 852, 881 | 0, 0, 0 | 3 |
+
+Antes de reutilizar grants, la etapa repetida costó 92–128 ms en una corrida comparable; después mide 0 ms porque no inicia nuevas solicitudes. En una muestra adicional instrumentada desde `pointerdown`, el feedback real fue Formulario 22 ms, Historial 11 ms, Resultados 31 ms y Metas 17 ms. El valor de 104 ms de la tabla incluye aproximadamente 100 ms previos al evento de puntero dentro de Playwright; no representa 104 ms de trabajo de interfaz.
+
+No se oculta la variabilidad restante. Esa muestra adicional produjo 1848 ms en Metas, con 938 ms dentro de `official_targets`; la tabla tenía cero filas, por lo que no se atribuye el pico a tamaño de transferencia. Formulario, Historial y Resultados quedaron en 815–834 ms en esa misma corrida. Las doce muestras principales descargaron 0 B de JavaScript después del clic y no registraron tareas largas. El objetivo de 300 ms continúa cumpliéndose para rutas preparadas y revisitas, y no se cumple aún para primeras entradas A, que permanecen aproximadamente en 0.8 s salvo picos de red/consulta. No se añadieron índices, región, dependencias ni precarga adicional.

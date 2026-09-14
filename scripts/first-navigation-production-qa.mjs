@@ -271,6 +271,16 @@ async function navigate(page, routeName, scenario, hoverMs) {
       await page.waitForTimeout(hoverMs);
     }
 
+    await link.evaluate((element) => {
+      window.__qaNavigationPointerDownAt = null;
+      element.addEventListener(
+        "pointerdown",
+        () => {
+          window.__qaNavigationPointerDownAt = performance.now();
+        },
+        { capture: true, once: true },
+      );
+    });
     clickPerformanceTime = await page.evaluate(() => performance.now());
     clickedAt = Date.now();
     const pendingFeedback = page
@@ -282,7 +292,21 @@ async function navigate(page, routeName, scenario, hoverMs) {
         route.pathname,
         { timeout: 500 },
       )
-      .then(() => Math.round(Date.now() - clickedAt))
+      .then(async () => {
+        const feedbackTiming = await page.evaluate(() => ({
+          feedbackAt: performance.now(),
+          pointerDownAt: window.__qaNavigationPointerDownAt,
+        }));
+        return {
+          commandMs: Math.round(Date.now() - clickedAt),
+          pointerMs:
+            typeof feedbackTiming.pointerDownAt === "number"
+              ? Math.round(
+                  feedbackTiming.feedbackAt - feedbackTiming.pointerDownAt,
+                )
+              : null,
+        };
+      })
       .catch(() => null);
     const targetPattern = new RegExp(
       `${route.pathname.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:\\?|$)`,
@@ -327,10 +351,13 @@ async function navigate(page, routeName, scenario, hoverMs) {
     assert.equal(current.searchParams.get("from"), expectedPeriod.from, "ROUTE_PERIOD_FROM_MISMATCH");
     assert.equal(current.searchParams.get("to"), expectedPeriod.to, "ROUTE_PERIOD_TO_MISMATCH");
 
+    const feedback = await pendingFeedback;
+
     return {
       client,
       contentReadyMs,
-      feedbackMs: await pendingFeedback,
+      feedbackFromPointerMs: feedback?.pointerMs ?? null,
+      feedbackMs: feedback?.commandMs ?? null,
       rscResponses,
       rscStreams: Array.from(rscStreams.values()),
       route: routeName,
@@ -584,6 +611,12 @@ try {
   }
 
   assert.ok(measurements.every((measurement) => measurement.feedbackMs !== null), "PENDING_FEEDBACK_MISSING");
+  assert.ok(
+    measurements.every(
+      (measurement) => measurement.feedbackFromPointerMs !== null,
+    ),
+    "POINTER_FEEDBACK_MISSING",
+  );
   console.log(
     JSON.stringify({
       baseUrl,
