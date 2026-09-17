@@ -14,15 +14,19 @@ import {
   getTenantContextOptions,
 } from "@/lib/v7/server/tenant-context";
 import type { Actor } from "@/lib/v7/security/types";
+import {
+  aggregateContractMetrics,
+  compareOfficialVersions,
+  finiteMetricNumber,
+  selectOfficialVersions,
+  selectContractMetrics,
+  type ContractMetric,
+  type OfficialMetricKey,
+} from "@/lib/analytics/official-kpi-contracts";
 
-export type BranchBiMetricKey =
-  "revenue" | "margin" | "volume" | "occupancy" | "sla" | "score";
+export type BranchBiMetricKey = OfficialMetricKey;
 
-export type BranchBiMetric = {
-  label: string;
-  unit: string;
-  value: number;
-};
+export type BranchBiMetric = ContractMetric;
 
 export type BranchBiTrendPoint = {
   period: string;
@@ -124,14 +128,19 @@ type ClosingVersionRow = {
   period_start: string | null;
   published_at: string | null;
   quality_score: number | string | null;
+  status: string;
+  version_number: number;
 };
 
 type ClosingKpiRow = {
   category: string | null;
   closing_version_id: string;
   data_status: string | null;
+  denominator: number | string | null;
+  formula_version: string | null;
   kpi_code: string;
   kpi_name: string;
+  numerator: number | string | null;
   unit: string;
   value: number | string | null;
 };
@@ -164,11 +173,6 @@ type ManualVersionRow = {
 };
 type AttachmentCountRow = { submission_version_id: string };
 
-function asFiniteNumber(value: number | string | null) {
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 /** Header-wide "all" options are URL sentinels, never database identifiers. */
 function hasScopedFilter(value: string | undefined) {
   return Boolean(value && !value.startsWith("__"));
@@ -188,43 +192,6 @@ function periodFor(version: ClosingVersionRow) {
   return (
     version.period_end ?? version.period_start ?? version.published_at ?? ""
   );
-}
-
-function isCalculable(row: ClosingKpiRow) {
-  const status = row.data_status?.toUpperCase() ?? "";
-  return status !== "NOT_CALCULABLE" && asFiniteNumber(row.value) !== null;
-}
-
-function metricKeyFor(row: ClosingKpiRow): BranchBiMetricKey | null {
-  const signature = `${row.kpi_code} ${row.kpi_name} ${row.category ?? ""}`
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-
-  if (/(venta|revenue|facturacion|ingreso)/.test(signature)) return "revenue";
-  if (/(margen|margin)/.test(signature)) return "margin";
-  if (/(ocupacion|occupancy|utilizacion|utilization)/.test(signature))
-    return "occupancy";
-  if (/(sla|tat|turnaround)/.test(signature)) return "sla";
-  if (/(puntaje|score|performance)/.test(signature)) return "score";
-  if (
-    /(orden|order|paciente|patient|cliente|client|sesion|session|estudio|study|volumen|volume)/.test(
-      signature,
-    )
-  )
-    return "volume";
-  return null;
-}
-
-function metricFrom(row: ClosingKpiRow): BranchBiMetric | null {
-  const value = asFiniteNumber(row.value);
-  if (!isCalculable(row) || value === null) return null;
-
-  return {
-    label: row.kpi_name || row.kpi_code,
-    unit: row.unit,
-    value,
-  };
 }
 
 async function getBranchBiSnapshotUncached(
@@ -285,7 +252,7 @@ async function getBranchBiSnapshotUncached(
   let versionsQuery = admin
     .from("closing_versions")
     .select(
-      "id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,published_at,quality_score",
+      "id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,published_at,quality_score,status,version_number",
     )
     .eq("organization_id", actor.scope.organizationId)
     .in("branch_id", branchIdsForVersionQuery)
@@ -320,7 +287,7 @@ async function getBranchBiSnapshotUncached(
   ]);
   const visibleBranchIds = context.branches.map((branch) => branch.id);
 
-  const versions = ((versionsResult.data ?? []) as ClosingVersionRow[]).filter(
+  const authorizedVersions = ((versionsResult.data ?? []) as ClosingVersionRow[]).filter(
     (version) =>
       actorCanSee(v7Actor, {
         organizationId: actor.scope.organizationId,
@@ -341,6 +308,7 @@ async function getBranchBiSnapshotUncached(
       (!hasScopedFilter(filter.businessLineId) ||
         version.business_line_id === filter.businessLineId),
   );
+  const versions = selectOfficialVersions(authorizedVersions);
   const versionIds = versions.map((version) => version.id);
   const [kpisResult, insightsResult] =
     load.mode === "history"
@@ -354,7 +322,7 @@ async function getBranchBiSnapshotUncached(
                 admin
                   .from("closing_kpi_results")
                   .select(
-                    "closing_version_id,kpi_code,kpi_name,category,value,unit,data_status",
+                    "closing_version_id,kpi_code,kpi_name,category,value,numerator,denominator,unit,data_status,formula_version",
                   )
                   .in("closing_version_id", versionIds)
                   .eq("is_demo", false),
@@ -580,7 +548,7 @@ async function getBranchBiSnapshotUncached(
     versionsByBranchLine.set(key, rows);
   }
   for (const rows of versionsByBranchLine.values()) {
-    rows.sort((left, right) => periodFor(left).localeCompare(periodFor(right)));
+    rows.sort(compareOfficialVersions);
   }
 
   const branchLineEntries: Array<
@@ -642,26 +610,26 @@ async function getBranchBiSnapshotUncached(
       const line = businessLineId
         ? (linesById.get(businessLineId) ?? null)
         : null;
-      const latestMetrics: Partial<Record<BranchBiMetricKey, BranchBiMetric>> =
-        {};
-
-      for (const kpi of latestVersion
-        ? (kpisByVersion.get(latestVersion.id) ?? [])
-        : []) {
-        const key = metricKeyFor(kpi);
-        const metric = metricFrom(kpi);
-        if (key && metric && !latestMetrics[key]) latestMetrics[key] = metric;
-      }
+      const versionMetricSelections = branchLineVersions.map((version) =>
+        selectContractMetrics(
+          kpisByVersion.get(version.id) ?? [],
+          line?.code ?? null,
+        ).metrics,
+      );
+      const latestMetrics = aggregateContractMetrics(versionMetricSelections);
 
       const trend = branchLineVersions.map((version) => {
-        const revenue =
-          (kpisByVersion.get(version.id) ?? [])
-            .map((kpi) => ({ key: metricKeyFor(kpi), metric: metricFrom(kpi) }))
-            .find((item) => item.key === "revenue")?.metric ?? null;
+        const revenue = selectContractMetrics(
+          kpisByVersion.get(version.id) ?? [],
+          line?.code ?? null,
+        ).metrics.revenue ?? null;
         return { period: periodFor(version), revenue };
       });
-      const dataQuality = latestVersion
-        ? asFiniteNumber(latestVersion.quality_score)
+      const qualityValues = branchLineVersions
+        .map((version) => finiteMetricNumber(version.quality_score))
+        .filter((value): value is number => value !== null);
+      const dataQuality = qualityValues.length > 0
+        ? qualityValues.reduce((sum, value) => sum + value, 0) / qualityValues.length
         : null;
 
       const branchManager = branchManagersByBranchId.get(branch.id) ?? null;
@@ -701,6 +669,14 @@ async function getBranchBiSnapshotUncached(
     })
     .filter(
       (record) =>
+        actorCanSee(v7Actor, {
+          organizationId: actor.scope.organizationId,
+          branchId: record.branchId,
+          businessLineId: record.businessLineId,
+          companyId: record.companyId,
+          countryId: record.countryId,
+          operationalAreaId: record.operationalAreaId,
+        }) &&
         (!hasScopedFilter(filter.countryId) ||
           record.countryId === filter.countryId) &&
         (!hasScopedFilter(filter.companyId) ||

@@ -7,6 +7,7 @@ import {
   type ManagerOption,
   type TenantContextOptions,
 } from "@/lib/v7/server/tenant-context";
+import { distinctBranchLineUnits } from "@/lib/tenant/multiline-scope";
 
 function jsonError(error: string, status: number) {
   return NextResponse.json({ error, ok: false }, { status });
@@ -88,12 +89,17 @@ export async function GET() {
     const lineByCompanyId = new Map(
       context.businessLines.map((line) => [line.parentId, line]),
     );
+    const explicitAuthorizedUnits = distinctBranchLineUnits(v7Actor.scopeGrants ?? []);
+    const includeConsolidatedLine = new Set(
+      explicitAuthorizedUnits.map((unit) => unit.businessLineId),
+    ).size > 1;
     const unitTypeFor = (lineCode?: string) => {
       if (lineCode === "LABORATORY") return "laboratorio" as const;
       if (lineCode === "IMAGING") return "imagenes" as const;
       return "fisioterapia" as const;
     };
     const options = {
+      authorizedUnits: explicitAuthorizedUnits,
       branches: context.branches.map((branch) => ({
         areaManagerName: context.areaManagers.find((manager) => manager.operationalAreaId === branch.operationalAreaId)?.name,
         areaZone: context.operationalAreas.find((area) => area.id === branch.operationalAreaId)?.name,
@@ -110,14 +116,25 @@ export async function GET() {
         operationalAreaId: branch.operationalAreaId,
         sourceTrace: "supabase-v7",
       })),
-      businessLines: context.businessLines.map((line) => ({
+      businessLines: [
+        ...(includeConsolidatedLine ? [{
+          code: "CONSOLIDATED",
+          companyId: null,
+          id: "__all_lines__",
+          isConsolidated: true,
+          isDemo: false,
+          name: "Consolidado autorizado",
+          unitType: "fisioterapia" as const,
+        }] : []),
+        ...context.businessLines.map((line) => ({
         code: line.code ?? "PHYSIOTHERAPY",
         companyId: line.parentId ?? null,
         id: line.id,
         isDemo: false,
         name: line.name,
         unitType: unitTypeFor(line.code),
-      })),
+        })),
+      ],
       companies: context.companies.map((company) => ({
         id: company.id,
         isDemo: false,

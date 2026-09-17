@@ -15,6 +15,7 @@ import type {
   OfficialTargetComparison,
 } from "@/lib/server/official-bi";
 import { cn } from "@/lib/utils";
+import { formatPercentage } from "@/lib/analytics/metric-format";
 
 type OfficialExecutiveDataDashboardProps = {
   mode: "overview" | "finances" | "targets" | "insights";
@@ -35,7 +36,7 @@ function formatNumber(value: number | null, unit?: string) {
   }
 
   if (unit === "ratio") {
-    return `${Math.round(value * 1000) / 10}%`;
+    return formatPercentage(value, "fraction");
   }
 
   return new Intl.NumberFormat("en-US", {
@@ -44,7 +45,7 @@ function formatNumber(value: number | null, unit?: string) {
 }
 
 function formatPercent(value: number | null) {
-  return value === null ? "Sin meta" : `${Math.round(value * 1000) / 10}%`;
+  return value === null ? "Sin meta" : formatPercentage(value, "fraction");
 }
 
 function statusLabel(

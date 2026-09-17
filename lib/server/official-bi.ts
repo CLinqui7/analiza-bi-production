@@ -7,6 +7,10 @@ import {
 
 import type { AuthorizationActor } from "@/lib/security/authorization-policy";
 import { getDefaultPeriod } from "@/lib/tenant/demo-context";
+import {
+  contractForKpiCode,
+  finiteMetricNumber,
+} from "@/lib/analytics/official-kpi-contracts";
 
 export type OfficialBusinessLineCode =
   "PHYSIOTHERAPY" | "LABORATORY" | "IMAGING";
@@ -154,25 +158,13 @@ function number(row: TargetRow, ...keys: string[]) {
       (candidate) =>
         typeof candidate === "number" || typeof candidate === "string",
     );
-  const parsed = typeof value === "number" ? value : Number(value);
-  return Number.isFinite(parsed) ? parsed : null;
+  return finiteMetricNumber(
+    typeof value === "number" || typeof value === "string" ? value : null,
+  );
 }
 
 function targetMetricKey(kpi: string) {
-  const normalized = kpi
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
-  if (/(venta|revenue|facturacion|ingreso)/.test(normalized))
-    return "revenue" as const;
-  if (/(margen|margin)/.test(normalized)) return "margin" as const;
-  if (/(ocupacion|occupancy|utilizacion)/.test(normalized))
-    return "occupancy" as const;
-  if (/(sla|tat|turnaround)/.test(normalized)) return "sla" as const;
-  if (/(puntaje|score|performance)/.test(normalized)) return "score" as const;
-  if (/(orden|paciente|sesion|estudio|volumen|volume)/.test(normalized))
-    return "volume" as const;
-  return null;
+  return contractForKpiCode(kpi)?.key ?? null;
 }
 
 /** Converts both date and month target representations to the one BI period grain. */
@@ -413,13 +405,19 @@ export async function getOfficialExecutiveSnapshot(
     ];
   });
   const recordsByBranchId = new Map(
-    scopedRecords.map((record) => [record.branchId, record]),
+    scopedRecords.map((record) => [
+      record.branchId,
+      scopedRecords.filter((candidate) => candidate.branchId === record.branchId),
+    ]),
   );
   const insights = branchSnapshot.insights.flatMap<OfficialInsight>(
     (insight) => {
-      const record = insight.branchId
-        ? recordsByBranchId.get(insight.branchId)
-        : null;
+      const branchRecords = insight.branchId
+        ? recordsByBranchId.get(insight.branchId) ?? []
+        : [];
+      // A branch-only insight cannot be assigned arbitrarily to one of several
+      // business lines. Keep it hidden until its source carries the line key.
+      const record = branchRecords.length === 1 ? branchRecords[0] : null;
       const businessLine = asOfficialLine(record?.businessLineCode ?? null);
       if (!record || !businessLine) return [];
 

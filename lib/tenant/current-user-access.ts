@@ -1,4 +1,5 @@
 import type { RoleKey } from "@/lib/tenant/demo-context";
+import type { AuthorizationScopeGrant } from "@/lib/security/authorization-policy";
 
 export type CurrentUserScope = {
   branchCity: string | null;
@@ -16,10 +17,12 @@ export type CurrentUserScope = {
 };
 
 export type CurrentUserAccess = {
+  allowedBranches?: string[];
   email: string;
   requiresPasswordChange?: boolean;
   roleKey: RoleKey;
   scope: CurrentUserScope;
+  scopeGrants?: AuthorizationScopeGrant[];
   userId: string;
 };
 

@@ -55,6 +55,7 @@ import {
 } from "@/lib/analytics/global-filters";
 import { isBranchManagerScopedAccess, type CurrentUserAccess } from "@/lib/tenant/current-user-access";
 import { shouldRenderScopedFilter } from "@/lib/analytics/filter-visibility";
+import { distinctBranchLineUnits } from "@/lib/tenant/multiline-scope";
 
 const demoBusinessLineStorageKey = "analiza:demo-business-line";
 const roleChangeEvent = "analiza:role-change";
@@ -65,6 +66,7 @@ type NamedFilterOption = {
 };
 
 type HeaderContextOptions = {
+  authorizedUnits: readonly { branchId: string; businessLineId: string }[];
   branches: readonly BranchOption[];
   businessLines: readonly BusinessLineOption[];
   companies: readonly CompanyOption[];
@@ -106,6 +108,7 @@ function fetchOfficialContextOptions() {
 }
 
 const demoHeaderContextOptions: HeaderContextOptions = {
+  authorizedUnits: [],
   branches: demoBranches,
   businessLines: demoBusinessLineOptions,
   companies: demoCompanyOptions,
@@ -115,6 +118,7 @@ const demoHeaderContextOptions: HeaderContextOptions = {
 };
 
 const emptyOfficialContextOptions: HeaderContextOptions = {
+  authorizedUnits: [],
   branches: [],
   businessLines: [],
   companies: [],
@@ -322,7 +326,12 @@ export function TenantContextHeader({
   const businessLineOptions = contextOptions.businessLines;
   const branchOptions = contextOptions.branches;
   const operationalAreaOptions = contextOptions.operationalAreas;
+  const branchManagerUnits = currentUserAccess?.roleKey === "gerente_sucursal"
+    ? distinctBranchLineUnits(currentUserAccess.scopeGrants ?? [])
+    : [];
+  const hasMultipleBranchLineAssignments = branchManagerUnits.length > 1;
   const scopedBranchAccess = isBranchManagerScopedAccess(currentUserAccess)
+    && !hasMultipleBranchLineAssignments
     ? currentUserAccess
     : null;
   const countryLockedByRole =
@@ -330,6 +339,7 @@ export function TenantContextHeader({
     (currentUserAccess?.roleKey === "gerente_operaciones" ||
       currentUserAccess?.roleKey === "gerente_area");
   const scopedCompanyAccess =
+    !hasMultipleBranchLineAssignments &&
     currentUserAccess?.scope.companyId &&
     currentUserAccess.scope.companyId !== consolidatedCompanyId
     ? currentUserAccess
@@ -451,13 +461,23 @@ export function TenantContextHeader({
   );
 
   const countryBranches = useMemo(
-    () =>
-      selectedCountry?.scope === "regional"
+    () => {
+      const branchesInCountry = selectedCountry?.scope === "regional"
         ? branchOptions
         : branchOptions.filter(
             (branch) => branch.countryId === effectiveCountryId,
-          ),
-    [branchOptions, effectiveCountryId, selectedCountry?.scope],
+          );
+      if (businessLineId.startsWith("__") || contextOptions.authorizedUnits.length === 0) {
+        return branchesInCountry;
+      }
+      const authorizedBranchIds = new Set(
+        contextOptions.authorizedUnits
+          .filter((unit) => unit.businessLineId === businessLineId)
+          .map((unit) => unit.branchId),
+      );
+      return branchesInCountry.filter((branch) => authorizedBranchIds.has(branch.id));
+    },
+    [branchOptions, businessLineId, contextOptions.authorizedUnits, effectiveCountryId, selectedCountry?.scope],
   );
 
   const companies = useMemo(() => companyOptions, [companyOptions]);

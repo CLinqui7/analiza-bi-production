@@ -143,6 +143,15 @@ export function calculateOfficialKpis(
 
   const output: Array<CalculatedKpi | null> = [];
 
+  output.push(reportedKpi({
+    code: "reported_revenue",
+    name: "Facturación neta reportada",
+    category: "finance",
+    value: netRevenue,
+    unit: "USD",
+    field: numberValue(values, "net_revenue") !== null ? "net_revenue" : "lab_total_sales",
+  }));
+
   const scheduledOccupancy = percentKpi(
     "scheduled_occupancy",
     "Ocupación programada",

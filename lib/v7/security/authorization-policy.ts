@@ -1,5 +1,6 @@
 import { canCreateRole } from "@/lib/tenant/delegation-policy";
 import type { ActionKey, Actor, RoleKey, ScopeBoundary } from "@/lib/v7/security/types";
+import { anyScopeGrantAllows } from "@/lib/tenant/multiline-scope";
 
 const hierarchy: Record<RoleKey, number> = {
   super_admin: 100,
@@ -78,22 +79,7 @@ export function canAccessRecord(actor: Actor, target: ScopeBoundary) {
   const grants = actor.scopeGrants && actor.scopeGrants.length > 0
     ? actor.scopeGrants
     : [actor.scope];
-  const dimensions: Array<keyof Omit<ScopeBoundary, "organizationId">> = [
-    "countryId",
-    "companyId",
-    "operationalAreaId",
-    "branchId",
-    "businessLineId",
-  ];
-
-  return grants.some((grant) => (
-    grant.organizationId === target.organizationId
-    && dimensions.every((dimension) => {
-      const grantValue = grant[dimension];
-      const targetValue = target[dimension];
-      return !grantValue || !targetValue || grantValue === targetValue;
-    })
-  ));
+  return anyScopeGrantAllows(grants, target);
 }
 
 export function canDelegateRole(actorRole: RoleKey, targetRole: RoleKey) {

@@ -20,6 +20,7 @@ import {
 import { createAdminClient } from "@/lib/v7/server/admin-client";
 import { hasSupabaseAdminConfiguration } from "@/lib/v7/server/env";
 import { createClient } from "@/lib/supabase/server";
+import { scopeGrantAllows } from "@/lib/tenant/multiline-scope";
 
 export type ContextOption = {
   id: string;
@@ -133,20 +134,7 @@ function grantsFor(actor: Actor) {
 }
 
 function matchesGrant(grant: ScopeBoundary, target: ScopeBoundary) {
-  return (
-    grant.organizationId === target.organizationId &&
-    (!grant.countryId || grant.countryId === target.countryId) &&
-    (!grant.companyId || grant.companyId === target.companyId) &&
-    (!grant.operationalAreaId ||
-      grant.operationalAreaId === target.operationalAreaId) &&
-    (!grant.branchId || grant.branchId === target.branchId) &&
-    // A branch catalogue row has no business-line dimension. It can identify
-    // an assigned branch, but it must not reject that branch merely because
-    // the grant is line-specific; downstream records retain line checks.
-    (!grant.businessLineId ||
-      !target.businessLineId ||
-      grant.businessLineId === target.businessLineId)
-  );
+  return scopeGrantAllows(grant, target);
 }
 
 export function actorCanSee(actor: Actor, target: ScopeBoundary) {
