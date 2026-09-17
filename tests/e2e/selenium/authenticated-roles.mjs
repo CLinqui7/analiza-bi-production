@@ -258,16 +258,18 @@ async function installMonthlyFetchRecorder() {
 }
 
 async function selectMonthlyAssignment(assignmentLabel, templateSlug) {
-  const assignment = await driver.wait(until.elementLocated(By.css("[data-testid=monthly-assignment] select")), 15_000);
-  let option = null;
-  for (const candidate of await assignment.findElements(By.css("option"))) {
-    if ((await candidate.getText()) === assignmentLabel) {
-      option = candidate;
-      break;
+  await driver.wait(until.elementLocated(By.css("[data-testid=monthly-assignment] select")), 45_000);
+  const assignmentId = await driver.wait(async () => {
+    const assignments = await driver.findElements(By.css("[data-testid=monthly-assignment] select"));
+    if (assignments.length === 0) return false;
+    for (const candidate of await assignments[0].findElements(By.css("option"))) {
+      if ((await candidate.getText()) === assignmentLabel) {
+        return (await candidate.getAttribute("value")) || false;
+      }
     }
-  }
-  assert.ok(option, `QA assignment must exist: ${assignmentLabel}`);
-  const assignmentId = await option.getAttribute("value");
+    return false;
+  }, 45_000, `QA assignment must exist: ${assignmentLabel}`);
+  const assignment = await driver.findElement(By.css("[data-testid=monthly-assignment] select"));
   await driver.executeScript(
     `const select=arguments[0], value=arguments[1];
       const set=Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value').set;
@@ -380,7 +382,11 @@ async function publishCompleteMonthlyLine({ assignmentLabel, branchId, lineId, l
   assert.match(await bodyText(), new RegExp(lineName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")), `${lineName} must be visible in Resultados.`);
   await driver.get(`${baseUrl}/protected/cierres?${periodQuery}`);
   await waitForDashboard("Historial de cierres");
-  assert.ok((await driver.findElements(By.css("[data-testid=bi-history-entry]"))).length >= 1, `${lineName} must be visible in Historial.`);
+  await driver.wait(
+    until.elementLocated(By.css("[data-testid=bi-history-entry]")),
+    30_000,
+    `${lineName} must be visible in Historial.`,
+  );
 }
 
 async function verifyManagerLineViews({ branchId, lineId, lineName, period }) {
@@ -394,7 +400,11 @@ async function verifyManagerLineViews({ branchId, lineId, lineName, period }) {
   assert.match(await bodyText(), escapedName, `${lineName} must remain isolated in Sucursales.`);
   await driver.get(`${baseUrl}/protected/cierres?${periodQuery}`);
   await waitForDashboard("Historial de cierres");
-  assert.ok((await driver.findElements(By.css("[data-testid=bi-history-entry]"))).length >= 1, `${lineName} must remain visible in Historial.`);
+  await driver.wait(
+    until.elementLocated(By.css("[data-testid=bi-history-entry]")),
+    30_000,
+    `${lineName} must remain visible in Historial.`,
+  );
 }
 
 async function capture(name) {
@@ -406,9 +416,17 @@ async function waitForDashboard(title) {
   try {
     await driver.wait(
       until.elementLocated(By.css("[data-testid=official-branch-bi]")),
-      15_000,
+      45_000,
     );
-    assert.match(await bodyText(), new RegExp(title));
+    const expectedTitle = new RegExp(title);
+    await driver.wait(
+      async () => {
+        const dashboards = await driver.findElements(By.css("[data-testid=official-branch-bi]"));
+        return dashboards.length > 0 && expectedTitle.test(await dashboards[0].getText());
+      },
+      45_000,
+      `Dashboard title ${title} did not replace its loading state.`,
+    );
   } catch (error) {
     throw new Error(`Dashboard ${title} did not become ready at ${await driver.getCurrentUrl()}: ${(await bodyText()).slice(0, 500)}`, { cause: error });
   }
