@@ -62,6 +62,14 @@ assert.equal(consolidatedMargin?.denominator, 10000);
 assert.equal(consolidatedMargin?.value, 22, "El margen consolidado debe ponderarse por ingresos, no promediar porcentajes.");
 assert.equal(aggregateContractMetric([marginA, undefined], 2), null, "Una línea sin base impide presentar un margen consolidado parcial.");
 
+const partialRevenue = aggregateContractMetric([
+  selectContractMetrics([row({ closing_version_id: "a", kpi_code: "reported_revenue", value: 1100 })], "PHYSIOTHERAPY").metrics.revenue,
+  selectContractMetrics([row({ closing_version_id: "b", kpi_code: "reported_revenue", value: 3100 })], "PHYSIOTHERAPY").metrics.revenue,
+  undefined,
+], 3);
+assert.equal(partialRevenue?.value, 4200, "Las sumas conservan los datos oficiales disponibles.");
+assert.equal(partialRevenue?.coverage, "partial", "Las sumas incompletas deben declarar cobertura parcial.");
+
 const labVolume = selectContractMetrics([
   row({ kpi_code: "lab_total_orders", kpi_name: "Órdenes", unit: "ordenes", value: 10 }),
 ], "LABORATORY").metrics.volume;
