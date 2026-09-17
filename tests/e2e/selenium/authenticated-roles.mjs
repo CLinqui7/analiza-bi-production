@@ -83,6 +83,8 @@ async function cleanupQaOrganization(id) {
     const result = await admin.from(table).delete().in(column, values);
     fail(result.error, `QA ${table} cleanup`);
   };
+  await remove("monthly_submission_publication_reviews", "submission_id", submissionIds);
+  await remove("monthly_closing_correction_requests", "submission_id", submissionIds);
   await remove("manual_monthly_submission_events", "submission_id", submissionIds);
   await remove("manual_monthly_submission_attachments", "submission_version_id", versionIds);
   await remove("manual_monthly_submission_versions", "id", versionIds);
@@ -91,7 +93,7 @@ async function cleanupQaOrganization(id) {
   // rows before their scoped branch; dependent KPI and lineage rows cascade.
   await remove("kpi_targets");
   await remove("closing_versions");
-  for (const table of ["audit_logs", "reporting_lines", "directory_assignment_slots", "branch_managers", "manager_assignments", "user_roles", "profiles", "branches", "operational_areas", "business_lines", "companies", "countries"]) {
+  for (const table of ["audit_logs", "reporting_lines", "directory_assignment_slots", "directory_assignment_denials", "branch_managers", "manager_assignments", "user_roles", "profiles", "branches", "operational_areas", "business_lines", "companies", "countries"]) {
     await remove(table);
   }
   const deleted = await admin.from("organizations").delete().eq("id", id);
@@ -303,6 +305,21 @@ async function fillMonthlyForm(period) {
   }
 }
 
+async function confirmMonthlyPublicationReview() {
+  await driver.findElement(By.css("[data-testid=monthly-review-prepare]")).click();
+  const confirmation = await driver.wait(
+    until.elementLocated(By.css("[data-testid=monthly-review-confirmation]")),
+    30_000,
+  );
+  assert.match(await bodyText(), /He revisado la información y confirmo su publicación/);
+  await confirmation.click();
+  await driver.findElement(By.css("[data-testid=monthly-review-confirm]")).click();
+  await driver.wait(
+    async () => (await driver.findElement(By.css("[data-testid=monthly-publish]")).getAttribute("disabled")) === null,
+    30_000,
+  );
+}
+
 async function publishCompleteMonthlyLine({ assignmentLabel, branchId, lineId, lineName, period, templateSlug }) {
   await driver.get(`${baseUrl}/protected/plantillas`);
   await driver.wait(until.elementLocated(By.css("[data-testid=monthly-derived-context]")), 15_000);
@@ -318,10 +335,10 @@ async function publishCompleteMonthlyLine({ assignmentLabel, branchId, lineId, l
   assert.ok((await driver.findElements(By.css("[data-testid=monthly-pending-blockers]"))).length === 1, `${lineName} incomplete draft must expose blockers.`);
   await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(monthlyEvidenceFixture);
   await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
-  await driver.executeScript("window.__qaLastPublish = null;");
-  await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
-  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 15_000);
-  assert.equal((await driver.executeScript("return window.__qaLastPublish;")).status, 422, `${lineName} incomplete draft must not publish.`);
+  await driver.findElement(By.css("[data-testid=monthly-review-prepare]")).click();
+  await driver.wait(until.elementLocated(By.css("[data-testid=monthly-review-confirmation]")), 30_000);
+  assert.match(await bodyText(), /Bloqueos:/, `${lineName} incomplete review must expose blockers.`);
+  assert.equal(await driver.findElement(By.css("[data-testid=monthly-publish]")).isEnabled(), false, `${lineName} incomplete draft must not publish.`);
   await fillMonthlyForm(period);
   await driver.findElement(By.css("[data-testid=monthly-final-step]")).click();
   await driver.executeScript("window.__qaLastSave = null;");
@@ -330,6 +347,7 @@ async function publishCompleteMonthlyLine({ assignmentLabel, branchId, lineId, l
   assert.equal((await driver.executeScript("return window.__qaLastSave;")).status, 201, `${lineName} completed draft must be versioned with HTTP 201.`);
   await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(monthlyEvidenceFixture);
   await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
+  await confirmMonthlyPublicationReview();
   await driver.executeScript("window.__qaLastPublish = null;");
   await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
   await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 30_000);
@@ -1098,7 +1116,7 @@ try {
   assert.match(targetsText, /Metas aprobadas vs resultados/, "Metas must load the approved QA target.");
   assert.match(targetsText, /\$2,100/, "Metas must show the published actual KPI.");
   assert.match(targetsText, /\$2,000/, "Metas must show the approved target value.");
-  assert.match(targetsText, /105%/, "Metas must calculate compliance from the real actual and target.");
+  assert.match(targetsText, /105\.0%/, "Metas must calculate compliance from the real actual and target with one decimal.");
   assert.match(targetsText, /Cumplido/, "Metas must expose the derived target state.");
   await capture("ga");
 
@@ -1161,12 +1179,10 @@ try {
     `The finalized ${monthlyEvidenceFileName} attachment must be visible.`,
   );
   await capture("gs-incomplete-attachment");
-  await driver.executeScript("window.__qaLastPublish = null; window.__qaLastSave = null;");
-  await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
-  await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 15_000);
-  const incompletePublish = await driver.executeScript("return window.__qaLastPublish;");
-  assert.equal(incompletePublish.status, 422, "Publishing an incomplete draft must be blocked.");
-  assert.equal(incompletePublish.body?.error, "NO_SUPPORTED_KPIS", "A source form without an approved reported KPI must fail closed.");
+  await driver.findElement(By.css("[data-testid=monthly-review-prepare]")).click();
+  await driver.wait(until.elementLocated(By.css("[data-testid=monthly-review-confirmation]")), 30_000);
+  assert.match(await bodyText(), /Bloqueos:.*NO_SUPPORTED_KPIS/, "A source form without an approved KPI must fail review closed.");
+  assert.equal(await driver.findElement(By.css("[data-testid=monthly-publish]")).isEnabled(), false, "Publishing an incomplete draft must remain disabled.");
   await capture("gs-incomplete-blocked");
   const formStepCount = (await driver.findElements(By.css("[data-testid=monthly-form-steps] button"))).length - 1;
   for (let stepIndex = 0; stepIndex < formStepCount; stepIndex += 1) {
@@ -1218,6 +1234,7 @@ try {
   assert.equal(completedSave.responses?.physio_sale_dd, 1, "The completed save must contain the source-specific Physiotherapy sale.");
   await driver.findElement(By.css("[data-testid=monthly-evidence-input]")).sendKeys(monthlyEvidenceFixture);
   await driver.wait(async () => /Archivo\(s\) cargado\(s\)/.test(await bodyText()), 30_000);
+  await confirmMonthlyPublicationReview();
   await driver.executeScript("window.__qaLastPublish = null;");
   await driver.findElement(By.css("[data-testid=monthly-publish]")).click();
   await driver.wait(async () => Boolean(await driver.executeScript("return window.__qaLastPublish;")), 30_000);

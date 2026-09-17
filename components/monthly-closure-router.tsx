@@ -1,5 +1,6 @@
 import { LaboratoryVerticalDashboard } from "@/components/laboratory-vertical-dashboard";
 import { MonthlySubmissionCenter } from "@/components/production/monthly-submission-center";
+import { CorrectionApprovalQueue } from "@/components/production/correction-approval-queue";
 import { ImagingVerticalDashboard } from "@/components/imaging-vertical-dashboard";
 import { PhysiotherapyVerticalDashboard } from "@/components/physiotherapy-vertical-dashboard";
 import { BranchBiServerDashboard } from "@/components/branch-bi-server-dashboard";
@@ -113,6 +114,13 @@ export async function MonthlyClosureRouter({
             ? "results"
             : "results";
       return <BranchBiServerDashboard actor={actor} filter={filter} mode={dashboardMode} trace={trace} />;
+    }
+
+    if (actor.roleKey === "gerente_area") {
+      return <>
+        <CorrectionApprovalQueue />
+        <NavigationPerformanceTraceMarker trace={trace} />
+      </>;
     }
 
     if (actor.roleKey !== "gerente_sucursal") {

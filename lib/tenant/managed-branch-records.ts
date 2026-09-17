@@ -567,18 +567,6 @@ export const managedBranchRecords: ManagedBranchRecord[] = [
     demoFlag: true,
   },
   {
-    id: "managed-sv-physiotherapy-ss-centro-medico-l024",
-    countryIso2: "SV",
-    businessLineCode: "PHYSIOTHERAPY",
-    branchName: "SS - Centro Medico - L024",
-    branchManagerName: "Kriscia Dominguez",
-    areaManagerName: "Edwin Isaac Santillana",
-    areaZone: "Centro",
-    sourceTrace: "DEMO ddddd2.xlsx / info general",
-    isActive: true,
-    demoFlag: true,
-  },
-  {
     id: "managed-sv-physiotherapy-ss-escalon-fisioterapia",
     countryIso2: "SV",
     businessLineCode: "PHYSIOTHERAPY",

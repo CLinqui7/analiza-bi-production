@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
@@ -11,14 +12,19 @@ import {
   savedMonthlyFormContractVersion,
   validateMonthlyFormContract,
 } from "@/lib/monthly-form-contract";
+import { buildMonthlyPublicationReview } from "@/lib/server/monthly-publication-review";
 import { assertRecordAccess } from "@/lib/v7/security/authorization-policy";
 import { actorForApi, isApiResponse } from "@/lib/v7/server/api-auth";
 import { validateMonthlyResponses } from "@/lib/server/monthly-validation";
 import { createAdminClient } from "@/lib/v7/server/admin-client";
 import { hasSupabaseAdminConfiguration } from "@/lib/v7/server/env";
-import { createClient } from "@/lib/supabase/server";
 
-const schema = z.object({ submissionId: z.string().uuid(), versionId: z.string().uuid() });
+const schema = z.object({
+  submissionId: z.string().uuid(),
+  versionId: z.string().uuid(),
+  reviewId: z.string().uuid(),
+  correctionRequestId: z.string().uuid().nullable().optional(),
+});
 
 type Submission = {
   id: string;
@@ -30,14 +36,25 @@ type Submission = {
   business_line_id: string;
   period_start: string;
   period_end: string;
+  current_version_number: number;
   is_demo: boolean;
 };
-type Version = { id: string; submission_id: string; version_number: number; responses: Record<string, unknown>; status: string };
+type Version = {
+  id: string; submission_id: string; version_number: number; responses: Record<string, unknown>;
+  status: string; submitted_by: string; correction_request_id: string | null;
+  base_submission_version_id: string | null;
+};
 type BusinessLine = { id: string; code: string; name: string };
+type Branch = { id: string; code: string; name: string };
 type KpiDefinition = { id: string; code: string };
 type KpiResult = { id: string; kpi_code: string };
 type Attachment = {
   id: string;
+  original_file_name: string;
+  byte_size: number;
+  sha256: string;
+  storage_bucket: string;
+  storage_path: string;
   parser_kind: string;
   parser_status: string;
   extracted_summary: Record<string, unknown>;
@@ -79,29 +96,34 @@ export async function POST(request: Request) {
 
   const parsed = schema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "INVALID_PAYLOAD" }, { status: 400 });
+  if (!hasSupabaseAdminConfiguration()) {
+    return NextResponse.json({ error: "SUPABASE_ADMIN_NOT_CONFIGURED" }, { status: 503 });
+  }
   // Promotion writes the authoritative closing/KPI graph.  It is privileged
   // server-only work, performed only after actorForApi and assertRecordAccess
   // have checked the caller and the exact submission scope above.
-  const supabase = hasSupabaseAdminConfiguration()
-    ? createAdminClient()
-    : await createClient();
+  const supabase = createAdminClient();
 
   const [{ data: submissionData }, { data: versionData }] = await Promise.all([
     supabase
       .from("manual_monthly_submissions")
-      .select("id,organization_id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,is_demo")
+      .select("id,organization_id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,current_version_number,is_demo")
       .eq("id", parsed.data.submissionId)
       .maybeSingle(),
     supabase
       .from("manual_monthly_submission_versions")
-      .select("id,submission_id,version_number,responses,status")
+      .select("id,submission_id,version_number,responses,status,submitted_by,correction_request_id,base_submission_version_id")
       .eq("id", parsed.data.versionId)
       .maybeSingle(),
   ]);
   if (!submissionData || !versionData) return NextResponse.json({ error: "NOT_FOUND" }, { status: 404 });
   const submission = submissionData as Submission;
   const version = versionData as Version;
-  if (version.submission_id !== submission.id || submission.is_demo) return NextResponse.json({ error: "INVALID_VERSION" }, { status: 400 });
+  if (
+    version.submission_id !== submission.id
+    || version.version_number !== submission.current_version_number
+    || submission.is_demo
+  ) return NextResponse.json({ error: "INVALID_OR_STALE_VERSION" }, { status: 409 });
   if (version.status === "published") return NextResponse.json({ error: "VERSION_ALREADY_PUBLISHED" }, { status: 409 });
 
   try {
@@ -117,13 +139,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "FORBIDDEN_SCOPE" }, { status: 403 });
   }
 
-  const { data: lineData } = await supabase
-    .from("business_lines")
-    .select("id,code,name")
-    .eq("id", submission.business_line_id)
-    .maybeSingle();
-  if (!lineData) return NextResponse.json({ error: "BUSINESS_LINE_NOT_FOUND" }, { status: 409 });
+  const [{ data: lineData }, { data: branchData }] = await Promise.all([
+    supabase.from("business_lines").select("id,code,name").eq("id", submission.business_line_id).maybeSingle(),
+    supabase.from("branches").select("id,code,name").eq("id", submission.branch_id).maybeSingle(),
+  ]);
+  if (!lineData || !branchData) return NextResponse.json({ error: "PUBLICATION_CONTEXT_NOT_FOUND" }, { status: 409 });
   const line = lineData as BusinessLine;
+  const branch = branchData as Branch;
   const formLine = resolveFormBusinessLine(line);
   if (!formLine) return NextResponse.json({ error: "UNSUPPORTED_BUSINESS_LINE" }, { status: 422 });
   const formContractVersion = savedMonthlyFormContractVersion(formLine, version.responses);
@@ -159,12 +181,24 @@ export async function POST(request: Request) {
 
   const { data: attachmentData, error: attachmentError } = await supabase
     .from("manual_monthly_submission_attachments")
-    .select("id,parser_kind,parser_status,extracted_summary,warning_codes")
+    .select("id,original_file_name,byte_size,sha256,storage_bucket,storage_path,parser_kind,parser_status,extracted_summary,warning_codes")
     .eq("submission_id", submission.id)
     .eq("submission_version_id", version.id)
     .order("created_at", { ascending: true });
   if (attachmentError) return NextResponse.json({ error: attachmentError.message }, { status: 400 });
   const attachments = (attachmentData ?? []) as Attachment[];
+  for (const attachment of attachments) {
+    const downloaded = await supabase.storage.from(attachment.storage_bucket).download(attachment.storage_path);
+    if (downloaded.error || !downloaded.data) {
+      return NextResponse.json({ error: "PUBLICATION_EVIDENCE_UNAVAILABLE", attachmentId: attachment.id }, { status: 409 });
+    }
+    const currentHash = createHash("sha256")
+      .update(Buffer.from(await downloaded.data.arrayBuffer()))
+      .digest("hex");
+    if (currentHash !== attachment.sha256) {
+      return NextResponse.json({ error: "PUBLICATION_EVIDENCE_HASH_MISMATCH", attachmentId: attachment.id }, { status: 409 });
+    }
+  }
   const validAttachments = attachments.filter((item) => !["blocked", "failed"].includes(item.parser_status));
   if (validAttachments.length < 1 || validAttachments.length > 2) {
     return NextResponse.json({
@@ -187,6 +221,42 @@ export async function POST(request: Request) {
       error: "NO_SUPPORTED_KPIS",
       message: "La fuente no contiene campos suficientes para calcular un KPI oficial aprobado.",
     }, { status: 422 });
+  }
+
+  const publicationReview = buildMonthlyPublicationReview({
+    submission,
+    version,
+    branch,
+    businessLine: line,
+    attachments,
+    kpis: calculated,
+    blockers: [],
+    warnings: [
+      ...responseValidation.warnings,
+      ...attachments.flatMap((item) => item.warning_codes ?? []),
+    ],
+  });
+  const { data: reviewData } = await supabase
+    .from("monthly_submission_publication_reviews")
+    .select("id,submission_id,submission_version_id,reviewer_id,content_digest,status")
+    .eq("id", parsed.data.reviewId)
+    .maybeSingle();
+  if (
+    !reviewData
+    || reviewData.status !== "confirmed"
+    || reviewData.submission_id !== submission.id
+    || reviewData.submission_version_id !== version.id
+    || reviewData.reviewer_id !== actor.userId
+    || reviewData.reviewer_id !== version.submitted_by
+    || reviewData.content_digest !== publicationReview.digest
+  ) {
+    return NextResponse.json({
+      error: "CURRENT_PUBLICATION_REVIEW_REQUIRED",
+      message: "El contenido cambió o la revisión no corresponde a esta versión. Revísala y confirma nuevamente.",
+    }, { status: 409 });
+  }
+  if ((parsed.data.correctionRequestId ?? null) !== (version.correction_request_id ?? null)) {
+    return NextResponse.json({ error: "CORRECTION_AUTHORIZATION_MISMATCH" }, { status: 409 });
   }
 
   const { data: existingClosings } = await supabase
@@ -286,7 +356,11 @@ export async function POST(request: Request) {
     }
   }
 
-  const finalized = await supabase.rpc("finalize_manual_closing_publication", { p_closing_id: closing.id });
+  const finalized = await supabase.rpc("finalize_reviewed_manual_closing_publication", {
+    p_closing_id: closing.id,
+    p_review_id: parsed.data.reviewId,
+    p_correction_request_id: parsed.data.correctionRequestId ?? null,
+  });
   if (finalized.error) {
     return cleanupPartialClosing(`PUBLICATION_FINALIZE_FAILED:${finalized.error.message}`);
   }
@@ -296,6 +370,9 @@ export async function POST(request: Request) {
     calculated_kpis: calculated.map((item) => item.code),
     attachment_ids: validAttachments.map((item) => item.id),
     form_contract_version: formContractVersion,
+    review_id: parsed.data.reviewId,
+    review_digest: publicationReview.digest,
+    correction_request_id: parsed.data.correctionRequestId ?? null,
   };
   await supabase.from("manual_monthly_submission_events").insert({
     submission_id: submission.id,
@@ -319,6 +396,9 @@ export async function POST(request: Request) {
       kpi_count: calculated.length,
       attachment_count: validAttachments.length,
       form_contract_version: formContractVersion,
+      review_id: parsed.data.reviewId,
+      review_digest: publicationReview.digest,
+      correction_request_id: parsed.data.correctionRequestId ?? null,
     },
   });
 

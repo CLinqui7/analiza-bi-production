@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { correctionUseError } from "@/lib/analytics/closing-correction-state";
 import {
   currentMonthlyFormContractVersion,
   isSupportedMonthlyFormContractVersion,
@@ -36,10 +37,17 @@ const saveSchema = z.object({
     formulaFieldCount: z.number().int().min(0).max(200),
   }).optional(),
   changeReason: z.string().max(500).optional(),
+  correctionRequestId: z.string().uuid().optional(),
 });
 
-type SubmissionRow = { id: string; current_version_number: number };
-type VersionContractRow = { responses: Record<string, unknown> };
+type SubmissionRow = { id: string; current_version_number: number; status?: string };
+type VersionContractRow = {
+  id: string;
+  responses: Record<string, unknown>;
+  status: string;
+  correction_request_id: string | null;
+  base_submission_version_id: string | null;
+};
 type SubmissionScopeRow = { organization_id: string; country_id: string; company_id: string; operational_area_id: string | null; branch_id: string; business_line_id: string; period_start: string; period_end: string; status: string; is_demo: boolean };
 type BranchRow = {
   id: string;
@@ -200,7 +208,7 @@ export async function POST(request: Request) {
       : Promise.resolve({ data: null, error: null }),
     supabase
       .from("manual_monthly_submissions")
-      .select("id,current_version_number")
+      .select("id,current_version_number,status")
       .eq("organization_id", actor.scope.organizationId)
       .eq("branch_id", input.branchId)
       .eq("business_line_id", input.businessLineId)
@@ -222,19 +230,21 @@ export async function POST(request: Request) {
   const resolvedBranchManager = actorProfile?.display_name ?? actor.displayName;
   const resolvedAreaManager = areaManager?.display_name ?? "";
   let existingContractVersion: string | null = null;
+  let currentVersion: VersionContractRow | null = null;
   if (existingSubmission && existingSubmission.current_version_number > 0) {
     const { data: currentVersionData, error: currentVersionError } = await supabase
       .from("manual_monthly_submission_versions")
-      .select("responses")
+      .select("id,responses,status,correction_request_id,base_submission_version_id")
       .eq("submission_id", existingSubmission.id)
       .eq("version_number", existingSubmission.current_version_number)
       .maybeSingle();
     if (currentVersionError || !currentVersionData) {
       return NextResponse.json({ error: "CURRENT_FORM_CONTRACT_NOT_FOUND" }, { status: 409 });
     }
+    currentVersion = currentVersionData as VersionContractRow;
     existingContractVersion = savedMonthlyFormContractVersion(
       formLine,
-      (currentVersionData as VersionContractRow).responses,
+      currentVersion.responses,
     );
   }
   const formContractVersion = input.formContractVersion
@@ -311,6 +321,64 @@ export async function POST(request: Request) {
   // enforced only by the publication endpoint.  Invalid payloads and invalid
   // field formats have already been rejected above.
 
+  let correctionRequestId: string | null = null;
+  let baseSubmissionVersionId: string | null = null;
+  if (existingSubmission && currentVersion) {
+    const { count: publishedCount, error: publishedCountError } = await supabase
+      .from("manual_monthly_submission_versions")
+      .select("id", { head: true, count: "exact" })
+      .eq("submission_id", existingSubmission.id)
+      .eq("status", "published");
+    if (publishedCountError) return NextResponse.json({ error: publishedCountError.message }, { status: 400 });
+    const hasPublishedHistory = (publishedCount ?? 0) > 0;
+    if (hasPublishedHistory && !input.correctionRequestId) {
+      return NextResponse.json({
+        error: "APPROVED_CORRECTION_REQUIRED",
+        message: "Este cierre ya fue publicado. Solicita y obtiene autorización del Gerente de Área antes de crear una corrección.",
+      }, { status: 409 });
+    }
+    if (!hasPublishedHistory && input.correctionRequestId) {
+      return NextResponse.json({ error: "INITIAL_VERSION_CANNOT_USE_CORRECTION_AUTHORIZATION" }, { status: 409 });
+    }
+    if (hasPublishedHistory) {
+      const expectedBaseVersionId = currentVersion.status === "published"
+        ? currentVersion.id
+        : currentVersion.base_submission_version_id;
+      const { data: correction } = await catalogClient
+        .from("monthly_closing_correction_requests")
+        .select("id,status,submission_id,base_submission_version_id,base_closing_version_id,responsible_profile_id,approver_profile_id")
+        .eq("id", input.correctionRequestId!)
+        .maybeSingle();
+      if (!correction || (currentVersion.correction_request_id && currentVersion.correction_request_id !== correction.id)) {
+        return NextResponse.json({ error: "INVALID_OR_STALE_CORRECTION_AUTHORIZATION" }, { status: 409 });
+      }
+      const { data: baseClosing } = await catalogClient.from("closing_versions")
+        .select("id,status,manual_submission_version_id")
+        .eq("id", correction.base_closing_version_id)
+        .maybeSingle();
+      const correctionError = correctionUseError({
+        status: correction.status,
+        requestSubmissionId: correction.submission_id,
+        targetSubmissionId: existingSubmission.id,
+        requestBaseVersionId: correction.base_submission_version_id,
+        expectedBaseVersionId,
+        responsibleId: correction.responsible_profile_id,
+        actorId: actor.userId,
+        approverId: correction.approver_profile_id,
+        baseStillOfficial: Boolean(
+          baseClosing
+          && baseClosing.status === "published"
+          && baseClosing.manual_submission_version_id === correction.base_submission_version_id
+        ),
+      });
+      if (correctionError) {
+        return NextResponse.json({ error: correctionError }, { status: 409 });
+      }
+      correctionRequestId = correction.id;
+      baseSubmissionVersionId = correction.base_submission_version_id;
+    }
+  }
+
   let submissionData = existingSubmission;
 
   if (!submissionData) {
@@ -354,6 +422,8 @@ export async function POST(request: Request) {
       status: "draft",
       change_reason: input.changeReason ?? null,
       submitted_by: actor.userId,
+      correction_request_id: correctionRequestId,
+      base_submission_version_id: baseSubmissionVersionId,
     })
     .select("id,version_number,status,created_at")
     .single();
@@ -368,7 +438,7 @@ export async function POST(request: Request) {
     submission_version_id: version.id,
     event_type: nextVersion === 1 ? "created" : "saved",
     actor_id: actor.userId,
-    details: { warnings: draftValidation.warnings, blockers: draftValidation.blockers, form_line: formLine, form_contract_version: formContractVersion, import_source: importTrace },
+    details: { warnings: draftValidation.warnings, blockers: draftValidation.blockers, form_line: formLine, form_contract_version: formContractVersion, import_source: importTrace, correction_request_id: correctionRequestId, base_submission_version_id: baseSubmissionVersionId },
   });
   await supabase.from("audit_logs").insert({
     organization_id: actor.scope.organizationId,
@@ -379,7 +449,7 @@ export async function POST(request: Request) {
     country_id: input.countryId,
     company_id: input.companyId,
     branch_id: input.branchId,
-    metadata: { version: nextVersion, form_line: formLine, form_contract_version: formContractVersion, imported_response_count: importTrace?.recognizedCount ?? 0 },
+    metadata: { version: nextVersion, form_line: formLine, form_contract_version: formContractVersion, imported_response_count: importTrace?.recognizedCount ?? 0, correction_request_id: correctionRequestId, base_submission_version_id: baseSubmissionVersionId },
   });
 
   return NextResponse.json({

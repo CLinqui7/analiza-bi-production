@@ -139,6 +139,25 @@ const contextFieldIds = new Set([
 
 type SavedVersion = { id: string; version_number: number; status: string; created_at: string };
 type SavedSubmission = { submissionId: string; versionId: string; versionNumber: number; status: string };
+type PublicationReview = {
+  submission: { branchName: string; businessLineName: string; periodStart: string; periodEnd: string };
+  version: { number: number };
+  responses: Array<{ field: string; value: unknown }>;
+  explicitZeroFields: string[];
+  blankFields: string[];
+  evidence: Array<{ id: string; fileName: string; parserStatus: string }>;
+  kpis: Array<{ code: string; name: string; value: number; unit: string }>;
+  blockers: string[];
+  warnings: string[];
+};
+type CorrectionRequest = {
+  id: string;
+  status: "pending" | "approved" | "rejected" | "revoked" | "completed";
+  request_reason: string;
+  decision_reason?: string | null;
+  requester_id: string;
+  approver_profile_id: string;
+};
 type ApiResult = {
   submissionId?: string;
   version?: SavedVersion;
@@ -474,10 +493,16 @@ export function MonthlySubmissionCenter({
   const [recent, setRecent] = useState<RecentSubmission[]>([]);
   const [recentLoading, setRecentLoading] = useState(false);
   const [showRecent, setShowRecent] = useState(false);
-  const [busy, setBusy] = useState<"save" | "publish" | "upload" | "import" | "delete" | "open" | "report" | null>(null);
+  const [busy, setBusy] = useState<"save" | "review" | "publish" | "correction" | "upload" | "import" | "delete" | "open" | "report" | null>(null);
   const [message, setMessage] = useState<{ type: "ok" | "error"; text: string } | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
   const [blockers, setBlockers] = useState<string[]>([]);
+  const [publicationReview, setPublicationReview] = useState<PublicationReview | null>(null);
+  const [reviewConfirmation, setReviewConfirmation] = useState(false);
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [correctionReason, setCorrectionReason] = useState("");
+  const [correctionRequests, setCorrectionRequests] = useState<CorrectionRequest[]>([]);
+  const approvedCorrection = correctionRequests.find((item) => item.status === "approved") ?? null;
   const contextRevisionRef = useRef(0);
   const busyOperationRef = useRef(0);
   const activeContextKeyRef = useRef(monthlyDraftKey(assignments[0]?.id ?? "", options.reportingMonths[0]?.id ?? monthValue()));
@@ -546,11 +571,13 @@ export function MonthlySubmissionCenter({
   );
   const completionPct = completion.total ? Math.round((completion.completed / completion.total) * 100) : 0;
   const currentVersionPublished = saved?.status === "published";
+  const currentVersionEditable = !currentVersionPublished || Boolean(approvedCorrection);
   const canAttemptPublish = Boolean(
     canPublish
     && saved
     && !dirty
-    && !currentVersionPublished,
+    && !currentVersionPublished
+    && reviewId,
   );
 
   const refreshRecent = useCallback(async () => {
@@ -580,6 +607,12 @@ export function MonthlySubmissionCenter({
   useEffect(() => {
     if (currentStep > steps.length) setCurrentStep(steps.length);
   }, [currentStep, steps.length]);
+  const attachmentIdentity = attachments.map((item) => item.id).sort().join("|");
+  useEffect(() => {
+    setPublicationReview(null);
+    setReviewConfirmation(false);
+    setReviewId(null);
+  }, [attachmentIdentity, dirty, saved?.versionId]);
 
   function activeDraft() {
     return copyMonthlyDraft({
@@ -668,6 +701,12 @@ export function MonthlySubmissionCenter({
     setMessage(null);
   }
 
+  async function loadCorrections(submissionId: string) {
+    const response = await fetch(`/api/monthly-submissions/${submissionId}/corrections`, { cache: "no-store" });
+    const body = (await response.json()) as { items?: CorrectionRequest[] };
+    if (response.ok) setCorrectionRequests(body.items ?? []);
+  }
+
   async function loadAttachments(
     submissionId: string,
     versionId: string,
@@ -729,6 +768,7 @@ export function MonthlySubmissionCenter({
         : []);
       setCurrentStep(0);
       await loadAttachments(body.submission.id, body.version.id, loadedContextKey, loadedRevision);
+      await loadCorrections(body.submission.id);
       if (shouldApplyMonthlyResponse(activeContextKeyRef.current, contextRevisionRef.current, loadedContextKey, loadedRevision)) {
         setMessage({ type: "ok", text: `Cierre cargado · versión ${body.version.version_number} · ${body.version.status}.` });
       }
@@ -743,6 +783,10 @@ export function MonthlySubmissionCenter({
 
   async function save() {
     if (!canWrite) return;
+    if (currentVersionPublished && !approvedCorrection) {
+      setMessage({ type: "error", text: "Solicita y espera la autorización del Gerente de Área antes de corregir un cierre publicado." });
+      return;
+    }
     if (!countryId || !companyId || !branchId || !businessLineId || !period.start || !period.end || !formLine) {
       setMessage({ type: "error", text: "Selecciona un país, empresa, sucursal, línea y mes válidos." });
       return;
@@ -767,6 +811,7 @@ export function MonthlySubmissionCenter({
           formContractVersion,
           importTrace: importTrace ?? undefined,
           changeReason: changeReason || undefined,
+          correctionRequestId: approvedCorrection?.id,
         }),
       });
       const body = (await response.json()) as ApiResult;
@@ -991,7 +1036,7 @@ export function MonthlySubmissionCenter({
   }
 
   async function deleteAttachment(attachmentId: string) {
-    if (!saved || !canWrite || currentVersionPublished) return;
+    if (!saved || !canWrite || !currentVersionEditable) return;
     const operationId = beginBusy("delete");
     const requestContextKey = activeContextKeyRef.current;
     const requestRevision = contextRevisionRef.current;
@@ -1045,6 +1090,76 @@ export function MonthlySubmissionCenter({
     }
   }
 
+  async function preparePublicationReview() {
+    if (!saved || dirty || currentVersionPublished) return;
+    const operationId = beginBusy("review");
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/monthly-submissions/${saved.submissionId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ versionId: saved.versionId, action: "prepare" }),
+      });
+      const body = (await response.json()) as { summary?: PublicationReview; publishable?: boolean; error?: string; message?: string };
+      if (!response.ok || !body.summary) throw new Error(body.message ?? body.error ?? "No se pudo preparar la revisión.");
+      setPublicationReview(body.summary);
+      setReviewConfirmation(false);
+      setReviewId(null);
+      if (!body.publishable) setMessage({ type: "error", text: "La revisión detectó pendientes que deben resolverse antes de confirmar." });
+    } catch (error) {
+      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo preparar la revisión." });
+    } finally {
+      clearBusy(operationId);
+    }
+  }
+
+  async function confirmPublicationReview() {
+    if (!saved || !publicationReview || !reviewConfirmation) return;
+    const operationId = beginBusy("review");
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/monthly-submissions/${saved.submissionId}/review`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          versionId: saved.versionId,
+          action: "confirm",
+          confirmationText: "He revisado la información y confirmo su publicación",
+        }),
+      });
+      const body = (await response.json()) as { reviewId?: string; error?: string; message?: string };
+      if (!response.ok || !body.reviewId) throw new Error(body.message ?? body.error ?? "No se pudo confirmar la revisión.");
+      setReviewId(body.reviewId);
+      setMessage({ type: "ok", text: "Revisión confirmada para esta versión y evidencia exactas. Ya puedes publicar." });
+    } catch (error) {
+      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo confirmar la revisión." });
+    } finally {
+      clearBusy(operationId);
+    }
+  }
+
+  async function requestCorrection() {
+    if (!saved || !currentVersionPublished || correctionReason.trim().length < 10) return;
+    const operationId = beginBusy("correction");
+    setMessage(null);
+    try {
+      const response = await fetch(`/api/monthly-submissions/${saved.submissionId}/corrections`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason: correctionReason }),
+      });
+      const body = (await response.json()) as { error?: string; message?: string };
+      if (!response.ok) throw new Error(body.message ?? body.error ?? "No se pudo solicitar la corrección.");
+      setCorrectionReason("");
+      await loadCorrections(saved.submissionId);
+      setMessage({ type: "ok", text: "Solicitud enviada al Gerente de Área asignado. El cierre seguirá bloqueado hasta su decisión." });
+    } catch (error) {
+      setMessage({ type: "error", text: error instanceof Error ? error.message : "No se pudo solicitar la corrección." });
+    } finally {
+      clearBusy(operationId);
+    }
+  }
+
   async function publish() {
     if (!saved || !canAttemptPublish) return;
     const operationId = beginBusy("publish");
@@ -1055,7 +1170,12 @@ export function MonthlySubmissionCenter({
       const response = await fetch("/api/monthly-submissions/publish", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ submissionId: saved.submissionId, versionId: saved.versionId }),
+        body: JSON.stringify({
+          submissionId: saved.submissionId,
+          versionId: saved.versionId,
+          reviewId,
+          correctionRequestId: approvedCorrection?.id ?? null,
+        }),
       });
       const body = (await response.json()) as { closingVersionId?: string; kpiCount?: number; error?: string; message?: string };
       if (!response.ok) throw new Error(body.message ?? body.error ?? "No se pudo publicar el cierre.");
@@ -1071,7 +1191,7 @@ export function MonthlySubmissionCenter({
   }
 
   function renderField(field: ManualMonthlyFormField) {
-    const disabled = !canWrite || currentVersionPublished;
+    const disabled = !canWrite || !currentVersionEditable;
 
     if (field.id === "period") {
       return (
@@ -1322,7 +1442,7 @@ export function MonthlySubmissionCenter({
               <input
                 className="sr-only"
                 data-testid="monthly-workbook-import-input"
-                disabled={busy !== null || !canWrite || currentVersionPublished}
+                disabled={busy !== null || !canWrite || !currentVersionEditable}
                 type="file"
                 accept=".xlsx"
                 onChange={(event) => {
@@ -1358,7 +1478,7 @@ export function MonthlySubmissionCenter({
                   <Button
                     type="button"
                     onClick={applyWorkbookImport}
-                    disabled={busy !== null || importPreview.status !== "ready" || importPreview.recognizedCount === 0 || !canWrite || currentVersionPublished}
+                    disabled={busy !== null || importPreview.status !== "ready" || importPreview.recognizedCount === 0 || !canWrite || !currentVersionEditable}
                   >
                     Aplicar {importPreview.recognizedCount} respuestas al formulario
                   </Button>
@@ -1397,7 +1517,7 @@ export function MonthlySubmissionCenter({
             </div>
           ) : (
             <>
-              {attachments.length < 2 && !currentVersionPublished && canWrite && (
+              {attachments.length < 2 && currentVersionEditable && canWrite && (
                 <label className={`flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-6 text-center ${busy === "upload" ? "cursor-wait opacity-70" : "cursor-pointer hover:bg-muted/30"}`}>
                   {busy === "upload" ? <Loader2 className="size-7 animate-spin text-primary" /> : <UploadCloud className="size-7 text-primary" />}
                   <span className="mt-2 text-sm font-medium">{busy === "upload" ? `Cargando archivo${uploadProgress === null ? "" : `: ${uploadProgress}%`}` : attachments.length === 0 ? "Seleccionar Excel del reporte" : "Agregar archivo de respaldo"}</span>
@@ -1424,7 +1544,7 @@ export function MonthlySubmissionCenter({
                         </div>
                         <div className="flex items-center gap-2">
                           <Badge className={parser.className}>{parser.label}</Badge>
-                          {canWrite && !currentVersionPublished && (
+                          {canWrite && currentVersionEditable && (
                             <Button type="button" size="sm" variant="ghost" disabled={busy === "delete"} onClick={() => void deleteAttachment(attachment.id)} aria-label={`Eliminar ${attachment.original_file_name}`}>
                               <Trash2 className="size-4" />
                             </Button>
@@ -1467,7 +1587,7 @@ export function MonthlySubmissionCenter({
                 className="h-10 rounded-md border bg-background px-3 text-sm"
                 value={changeReason}
                 onChange={(event) => { setChangeReason(event.target.value); setDirty(true); }}
-                disabled={!canWrite}
+                disabled={!canWrite || !currentVersionEditable}
               >
                 {changeReasonOptions.map((option) => <option key={option} value={option}>{option}</option>)}
                 {changeReason && !changeReasonOptions.includes(changeReason) && <option value={changeReason}>{changeReason}</option>}
@@ -1479,6 +1599,105 @@ export function MonthlySubmissionCenter({
               {!canPublish && <p className="mt-1 font-medium text-foreground">Tu rol puede preparar el cierre, pero la publicación oficial requiere un rol aprobador.</p>}
             </div>
           </div>
+
+          {currentVersionPublished && (
+            <div className="grid gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">
+              <div>
+                <p className="font-semibold">Cierre publicado e inmutable</p>
+                <p className="mt-1 text-xs">Para corregirlo, explica el motivo. Solo el Gerente de Área asignado puede autorizar una nueva versión; la autorización no cambia otros cierres ni asignaciones.</p>
+              </div>
+              {correctionRequests.map((item) => (
+                <div key={item.id} className="rounded-md border border-amber-200 bg-white/70 p-3 text-xs">
+                  <p><strong>Solicitud:</strong> {item.request_reason}</p>
+                  <p className="mt-1"><strong>Estado:</strong> {item.status}</p>
+                  {item.decision_reason && <p className="mt-1"><strong>Decisión:</strong> {item.decision_reason}</p>}
+                </div>
+              ))}
+              {!approvedCorrection && !correctionRequests.some((item) => item.status === "pending") && (
+                <>
+                  <Label htmlFor="correction-reason">Motivo preciso de la corrección</Label>
+                  <textarea
+                    id="correction-reason"
+                    className="min-h-24 rounded-md border bg-background p-3 text-sm"
+                    value={correctionReason}
+                    onChange={(event) => setCorrectionReason(event.target.value)}
+                    maxLength={1000}
+                    placeholder="Describe qué dato debe corregirse y por qué."
+                  />
+                  <Button type="button" variant="outline" onClick={() => void requestCorrection()} disabled={busy !== null || correctionReason.trim().length < 10}>
+                    {busy === "correction" ? <Loader2 className="mr-2 size-4 animate-spin" /> : null} Solicitar autorización
+                  </Button>
+                </>
+              )}
+              {approvedCorrection && <p className="font-medium text-emerald-800">Corrección autorizada. Edita, guarda una nueva versión y repite la revisión antes de publicar.</p>}
+            </div>
+          )}
+
+          {!currentVersionPublished && saved && !dirty && canPublish && (
+            <div className="grid gap-3 rounded-lg border bg-muted/20 p-4 text-sm">
+              <div>
+                <p className="font-semibold">Revisión previa obligatoria</p>
+                <p className="mt-1 text-xs text-muted-foreground">El resumen queda ligado por hash a esta versión, sus campos, KPI y archivos. Cualquier cambio exige revisar de nuevo.</p>
+              </div>
+              {!publicationReview && (
+                <Button data-testid="monthly-review-prepare" type="button" variant="outline" onClick={() => void preparePublicationReview()} disabled={busy !== null}>
+                  {busy === "review" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <FileCheck2 className="mr-2 size-4" />} Revisar antes de publicar
+                </Button>
+              )}
+              {publicationReview && (
+                <div className="grid gap-3">
+                  <div className="grid gap-2 rounded-md border bg-background p-3 text-xs md:grid-cols-2">
+                    <p><strong>Alcance:</strong> {publicationReview.submission.branchName} · {publicationReview.submission.businessLineName}</p>
+                    <p><strong>Periodo:</strong> {publicationReview.submission.periodStart} a {publicationReview.submission.periodEnd}</p>
+                    <p><strong>Versión:</strong> {publicationReview.version.number}</p>
+                    <p><strong>Evidencias:</strong> {publicationReview.evidence.length}</p>
+                    <p><strong>KPI calculados:</strong> {publicationReview.kpis.length}</p>
+                    <p><strong>Ceros explícitos:</strong> {publicationReview.explicitZeroFields.length}</p>
+                  </div>
+                  {publicationReview.kpis.length > 0 && (
+                    <div className="rounded-md border bg-background p-3 text-xs">
+                      {publicationReview.kpis.map((item) => <p key={item.code}>{item.name}: <strong>{item.value} {item.unit}</strong></p>)}
+                    </div>
+                  )}
+                  <details className="rounded-md border bg-background p-3 text-xs">
+                    <summary className="cursor-pointer font-medium">Campos y totales revisados ({publicationReview.responses.length})</summary>
+                    <div className="mt-3 grid gap-1 md:grid-cols-2">
+                      {publicationReview.responses.map((item) => (
+                        <p key={item.field}><span className="text-muted-foreground">{item.field}:</span> <strong>{item.value === null || item.value === "" ? "Sin dato" : String(item.value)}</strong></p>
+                      ))}
+                    </div>
+                  </details>
+                  {publicationReview.evidence.length > 0 && (
+                    <div className="rounded-md border bg-background p-3 text-xs">
+                      <p className="font-medium">Evidencia asociada</p>
+                      {publicationReview.evidence.map((item) => <p key={item.id}>{item.fileName} · {item.parserStatus}</p>)}
+                    </div>
+                  )}
+                  {publicationReview.blankFields.length > 0 && <p className="text-xs text-muted-foreground">Datos ausentes: {publicationReview.blankFields.join(" · ")}</p>}
+                  {publicationReview.explicitZeroFields.length > 0 && <p className="text-xs text-muted-foreground">Ceros registrados: {publicationReview.explicitZeroFields.join(" · ")}</p>}
+                  {publicationReview.blockers.length > 0 && <p className="text-xs font-medium text-red-700">Bloqueos: {publicationReview.blockers.join(" · ")}</p>}
+                  {publicationReview.warnings.length > 0 && <p className="text-xs text-amber-800">Advertencias: {publicationReview.warnings.join(" · ")}</p>}
+                  <label className="flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      data-testid="monthly-review-confirmation"
+                      className="mt-1"
+                      checked={reviewConfirmation}
+                      onChange={(event) => { setReviewConfirmation(event.target.checked); setReviewId(null); }}
+                      disabled={publicationReview.blockers.length > 0 || Boolean(reviewId)}
+                    />
+                    <span>He revisado la información y confirmo su publicación</span>
+                  </label>
+                  {!reviewId && (
+                    <Button data-testid="monthly-review-confirm" type="button" variant="outline" onClick={() => void confirmPublicationReview()} disabled={busy !== null || !reviewConfirmation || publicationReview.blockers.length > 0}>
+                      {busy === "review" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <CheckCircle2 className="mr-2 size-4" />} Confirmar revisión
+                    </Button>
+                  )}
+                  {reviewId && <p className="text-xs font-medium text-emerald-700">Revisión confirmada para el contenido actual.</p>}
+                </div>
+              )}
+            </div>
+          )}
 
           {warnings.length > 0 && (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"><AlertCircle className="mr-2 inline size-4" />{warnings.join(" · ")}</div>
@@ -1496,7 +1715,7 @@ export function MonthlySubmissionCenter({
 
           <div className="flex flex-wrap gap-2">
             {canWrite && (
-              <Button data-testid="monthly-save-draft" type="button" onClick={() => void save()} disabled={busy !== null || (!dirty && Boolean(saved))}>
+              <Button data-testid="monthly-save-draft" type="button" onClick={() => void save()} disabled={busy !== null || !currentVersionEditable || (!dirty && Boolean(saved))}>
                 {busy === "save" ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />} Guardar borrador
               </Button>
             )}
