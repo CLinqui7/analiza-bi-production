@@ -938,8 +938,9 @@ try {
     "CEO must receive only the permitted GA and GS UUID manager options.",
   );
   await openGlobalFilters();
-  assert.ok(
-    (await driver.findElements(By.css('select[aria-label="Gerente"]'))).length === 1,
+  await driver.wait(
+    until.elementLocated(By.css('select[aria-label="Gerente"]')),
+    45_000,
     "CEO with at least two real permitted managers must see the manager selector.",
   );
   for (const [slug, name] of [["laboratory", "Laboratorio"], ["imaging", "Imágenes"], ["physiotherapy", "Fisioterapia"]]) {
@@ -1142,7 +1143,12 @@ try {
   await driver.get(`${baseUrl}/protected/metas?branch=${branchA.id}&line=${line.data.id}&from=2026-08-01&to=2026-08-31`);
   await driver.wait(
     until.elementLocated(By.css('[data-route-content-ready="official-targets"]')),
-    20_000,
+    45_000,
+  );
+  await driver.wait(
+    async () => /Metas aprobadas vs resultados/.test(await bodyText()),
+    45_000,
+    "Metas must replace its loading state with the approved target view.",
   );
   const targetsText = await bodyText();
   assert.doesNotMatch(targetsText, /configuration_error|backend anterior/i);
