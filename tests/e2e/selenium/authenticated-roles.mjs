@@ -78,6 +78,13 @@ async function cleanupQaOrganization(id) {
     : { data: [], error: null };
   fail(versions.error, "QA version cleanup lookup");
   const versionIds = versions.data.map((item) => item.id);
+  const attachments = versionIds.length > 0
+    ? await admin
+        .from("manual_monthly_submission_attachments")
+        .select("storage_bucket,storage_path")
+        .in("submission_version_id", versionIds)
+    : { data: [], error: null };
+  fail(attachments.error, "QA attachment cleanup lookup");
   const remove = async (table, column = "organization_id", values = [id]) => {
     if (values.length === 0) return;
     const result = await admin.from(table).delete().in(column, values);
@@ -86,6 +93,14 @@ async function cleanupQaOrganization(id) {
   await remove("monthly_submission_publication_reviews", "submission_id", submissionIds);
   await remove("monthly_closing_correction_requests", "submission_id", submissionIds);
   await remove("manual_monthly_submission_events", "submission_id", submissionIds);
+  for (const bucket of new Set(attachments.data.map((item) => item.storage_bucket))) {
+    const paths = attachments.data
+      .filter((item) => item.storage_bucket === bucket)
+      .map((item) => item.storage_path);
+    if (paths.length === 0) continue;
+    const removedObjects = await admin.storage.from(bucket).remove(paths);
+    fail(removedObjects.error, `QA ${bucket} object cleanup`);
+  }
   await remove("manual_monthly_submission_attachments", "submission_version_id", versionIds);
   await remove("manual_monthly_submission_versions", "id", versionIds);
   await remove("manual_monthly_submissions");
