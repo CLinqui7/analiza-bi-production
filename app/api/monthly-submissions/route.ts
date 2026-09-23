@@ -69,6 +69,20 @@ type BusinessLineRow = {
 };
 type AreaRow = { manager_profile_id: string | null };
 type ProfileRow = { display_name: string | null };
+type CorrectionRequestRow = {
+  approver_profile_id: string;
+  base_closing_version_id: string;
+  base_submission_version_id: string;
+  id: string;
+  responsible_profile_id: string;
+  status: string;
+  submission_id: string;
+};
+type BaseClosingRow = {
+  id: string;
+  manual_submission_version_id: string | null;
+  status: string;
+};
 
 function loadDeadline(periodStart: string) {
   const match = /^(\d{4})-(\d{2})-01$/.exec(periodStart);
@@ -344,18 +358,20 @@ export async function POST(request: Request) {
       const expectedBaseVersionId = currentVersion.status === "published"
         ? currentVersion.id
         : currentVersion.base_submission_version_id;
-      const { data: correction } = await catalogClient
+      const { data: correctionData } = await catalogClient
         .from("monthly_closing_correction_requests")
         .select("id,status,submission_id,base_submission_version_id,base_closing_version_id,responsible_profile_id,approver_profile_id")
         .eq("id", input.correctionRequestId!)
         .maybeSingle();
+      const correction = correctionData as CorrectionRequestRow | null;
       if (!correction || (currentVersion.correction_request_id && currentVersion.correction_request_id !== correction.id)) {
         return NextResponse.json({ error: "INVALID_OR_STALE_CORRECTION_AUTHORIZATION" }, { status: 409 });
       }
-      const { data: baseClosing } = await catalogClient.from("closing_versions")
+      const { data: baseClosingData } = await catalogClient.from("closing_versions")
         .select("id,status,manual_submission_version_id")
         .eq("id", correction.base_closing_version_id)
         .maybeSingle();
+      const baseClosing = baseClosingData as BaseClosingRow | null;
       const correctionError = correctionUseError({
         status: correction.status,
         requestSubmissionId: correction.submission_id,

@@ -26,5 +26,15 @@ assert.doesNotMatch(
   /key=\{record\.branchId\}|setSelectedBranchId\(record\.branchId\)/,
   "A branch ID alone is not unique when more than one business line is visible.",
 );
+assert.match(
+  source,
+  /Venta en archivos[\s\S]*metrics\.documentSales/,
+  "Document-derived sales must remain visible as a separate metric instead of replacing official revenue.",
+);
+assert.match(
+  source,
+  /slice\(0, 8\)/,
+  "The six authorized laboratory branches must fit in the trend instead of silently dropping the sixth series.",
+);
 
 console.log("official-branch-bi-display: PASS");

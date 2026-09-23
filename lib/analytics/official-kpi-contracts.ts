@@ -1,5 +1,6 @@
 export type OfficialMetricKey =
   | "revenue"
+  | "documentSales"
   | "margin"
   | "volume"
   | "occupancy"
@@ -33,6 +34,7 @@ export type ContractKpiRow = {
   formula_version: string | null;
   kpi_code: string;
   kpi_name: string;
+  lineage?: readonly { validation_codes?: unknown }[] | null;
   numerator: number | string | null;
   unit: string;
   value: number | string | null;
@@ -50,6 +52,7 @@ export type ContractMetric = {
   scale: MetricScale;
   sourceVersionIds: string[];
   unit: string;
+  validationCodes: string[];
   value: number;
 };
 
@@ -69,6 +72,7 @@ const contracts: readonly OfficialKpiContract[] = [
   { aggregation: "sum", code: "lab_total_sales", key: "revenue", lines: ["LABORATORY"], scale: "absolute", unit: "USD" },
   { aggregation: "sum", code: "physio_sale_dd", key: "revenue", lines: ["PHYSIOTHERAPY"], scale: "absolute", unit: "USD" },
   { aggregation: "sum", code: "imaging_sale_dd", key: "revenue", lines: ["IMAGING"], scale: "absolute", unit: "USD" },
+  { aggregation: "sum", code: "lab_medical_exam_report_sales", key: "documentSales", lines: ["LABORATORY"], scale: "absolute", unit: "USD" },
   { aggregation: "weighted_ratio", code: "estimated_contribution_margin_pct", key: "margin", scale: "percentage_points", unit: "%" },
   { aggregation: "weighted_ratio", code: "gross_margin_pct", key: "margin", scale: "percentage_points", unit: "%" },
   { aggregation: "weighted_ratio", code: "operating_margin_pct", key: "margin", scale: "percentage_points", unit: "%" },
@@ -88,6 +92,7 @@ const contractByCode = new Map(contracts.map((contract) => [contract.code, contr
 
 const preferenceByMetric: Readonly<Record<OfficialMetricKey, readonly string[]>> = {
   revenue: ["reported_revenue", "net_revenue", "lab_total_sales", "physio_sale_dd", "imaging_sale_dd"],
+  documentSales: ["lab_medical_exam_report_sales"],
   margin: ["estimated_contribution_margin_pct", "gross_margin_pct", "operating_margin_pct"],
   volume: ["lab_total_orders", "physio_therapy_sessions", "physio_total_orders", "imaging_rx_count", "imaging_total_clients"],
   occupancy: ["effective_occupancy", "scheduled_occupancy"],
@@ -110,6 +115,16 @@ function contractApplies(contract: OfficialKpiContract, lineCode: string | null)
 function rowIsCalculable(row: ContractKpiRow) {
   return row.data_status?.toUpperCase() !== "NOT_CALCULABLE"
     && finiteMetricNumber(row.value) !== null;
+}
+
+function validationCodesForRow(row: ContractKpiRow) {
+  return Array.from(new Set(
+    (row.lineage ?? []).flatMap((item) =>
+      Array.isArray(item.validation_codes)
+        ? item.validation_codes.filter((code): code is string => typeof code === "string")
+        : [],
+    ),
+  ));
 }
 
 export function contractForKpiCode(code: string) {
@@ -140,10 +155,11 @@ export function selectContractMetrics(
       if (!row) continue;
       const value = finiteMetricNumber(row.value);
       if (value === null) continue;
+      const validationCodes = validationCodesForRow(row);
       selected[key] = {
         aggregation: contract.aggregation,
         code,
-        coverage: "complete",
+        coverage: validationCodes.length > 0 ? "partial" : "complete",
         denominator: finiteMetricNumber(row.denominator),
         formulaVersion: row.formula_version,
         key,
@@ -152,6 +168,7 @@ export function selectContractMetrics(
         scale: contract.scale,
         sourceVersionIds: [row.closing_version_id],
         unit: row.unit || contract.unit,
+        validationCodes,
         value,
       };
       break;
@@ -170,10 +187,11 @@ export function selectContractMetrics(
     );
     if (revenueBases.length === 1) {
       const source = revenueBases[0];
+      const validationCodes = validationCodesForRow(source);
       selected.revenue = {
         aggregation: "sum",
         code: "reported_revenue_from_margin_base",
-        coverage: "complete",
+        coverage: validationCodes.length > 0 ? "partial" : "complete",
         denominator: null,
         formulaVersion: source.formula_version,
         key: "revenue",
@@ -182,6 +200,7 @@ export function selectContractMetrics(
         scale: "absolute",
         sourceVersionIds: [source.closing_version_id],
         unit: "USD",
+        validationCodes,
         value: finiteMetricNumber(source.denominator)!,
       };
     } else if (revenueBases.length > 1) {
@@ -210,8 +229,12 @@ export function aggregateContractMetric(
     || metric.scale !== template.scale
   )) return null;
 
-  const coverage = present.length === expectedContributors ? "complete" : "partial";
+  const coverage = present.length === expectedContributors
+    && present.every((metric) => metric.coverage === "complete")
+    ? "complete"
+    : "partial";
   const sourceVersionIds = Array.from(new Set(present.flatMap((metric) => metric.sourceVersionIds)));
+  const validationCodes = Array.from(new Set(present.flatMap((metric) => metric.validationCodes)));
   if (template.aggregation === "weighted_ratio") {
     if (coverage !== "complete" || present.some((metric) =>
       metric.numerator === null || metric.denominator === null || metric.denominator <= 0
@@ -226,6 +249,7 @@ export function aggregateContractMetric(
       denominator,
       numerator,
       sourceVersionIds,
+      validationCodes,
       value: template.scale === "fraction" ? numerator / denominator : (numerator / denominator) * 100,
     };
   }
@@ -233,7 +257,7 @@ export function aggregateContractMetric(
   const value = template.aggregation === "sum"
     ? present.reduce((total, metric) => total + metric.value, 0)
     : present.reduce((total, metric) => total + metric.value, 0) / present.length;
-  return { ...template, coverage, sourceVersionIds, value };
+  return { ...template, coverage, sourceVersionIds, validationCodes, value };
 }
 
 export function aggregateContractMetrics(

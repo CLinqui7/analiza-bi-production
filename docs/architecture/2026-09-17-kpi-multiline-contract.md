@@ -26,10 +26,20 @@ agregación; no usa coincidencias por nombre ni el orden de PostgREST.
 - `estimated_contribution_margin` es un importe USD y nunca un porcentaje.
 - `estimated_contribution_margin_pct` es porcentaje en puntos porcentuales.
 - `revenue_target_achievement` es cumplimiento y no es facturación.
+- `lab_medical_exam_report_sales` es la venta agregada extraída del Excel de
+  exámenes médicos. Se presenta como `Venta en archivos`, con cobertura
+  explícita, y nunca sustituye silenciosamente la facturación total porque el
+  reporte puede representar sólo un subconjunto del cierre.
+- Los códigos de validación de `kpi_result_lineage` viajan en la misma consulta
+  embebida de resultados. Una advertencia del parser mantiene el importe
+  extraído visible, lo marca como cobertura parcial y no añade un viaje de red.
 - Márgenes consolidados suman numeradores y denominadores antes de dividir.
 - Volúmenes con unidades distintas no se suman.
 - Una base ausente vuelve no calculable el consolidado; no se sustituye por
   cero. Un cero numérico real se conserva.
+- La cobertura parcial se propaga entre niveles de agregación; una suma de
+  sucursales no puede convertir cierres documentales faltantes en cobertura
+  completa.
 
 La versión oficial se obtiene de filas `published` y, si existe una anomalía
 con más de una fila publicada en el mismo grano, se elige de forma

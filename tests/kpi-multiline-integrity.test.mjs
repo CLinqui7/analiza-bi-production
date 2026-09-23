@@ -50,6 +50,31 @@ const historicalSelection = selectContractMetrics([
 ], "LABORATORY").metrics;
 assert.equal(historicalSelection.revenue?.value, 390, "El cierre histórico conserva su facturación en la base contractual del margen.");
 
+const documentSelection = selectContractMetrics([
+  row({
+    kpi_code: "lab_medical_exam_report_sales",
+    kpi_name: "Venta en reporte de exámenes médicos",
+    unit: "USD",
+    value: 245.75,
+  }),
+], "LABORATORY").metrics;
+assert.equal(documentSelection.documentSales?.value, 245.75, "La venta extraída del Excel se conserva como métrica separada.");
+assert.equal(documentSelection.revenue, undefined, "Una venta documental parcial no sustituye la facturación oficial.");
+assert.equal(
+  selectContractMetrics([row({ kpi_code: "lab_medical_exam_report_sales", value: 245.75 })], "PHYSIOTHERAPY").metrics.documentSales,
+  undefined,
+  "El contrato documental de laboratorio no cruza líneas de negocio.",
+);
+const warnedDocumentSelection = selectContractMetrics([
+  row({
+    kpi_code: "lab_medical_exam_report_sales",
+    lineage: [{ validation_codes: ["ROW_LIMIT_50000_APPLIED"] }],
+    value: 567113.61,
+  }),
+], "LABORATORY").metrics.documentSales;
+assert.equal(warnedDocumentSelection?.coverage, "partial", "Una advertencia del parser impide declarar cobertura documental completa.");
+assert.deepEqual(warnedDocumentSelection?.validationCodes, ["ROW_LIMIT_50000_APPLIED"]);
+
 const marginA = selectContractMetrics([
   row({ closing_version_id: "a", kpi_code: "estimated_contribution_margin_pct", kpi_name: "Margen %", numerator: 400, denominator: 1000, unit: "%", value: 40 }),
 ], "LABORATORY").metrics.margin;
@@ -69,6 +94,11 @@ const partialRevenue = aggregateContractMetric([
 ], 3);
 assert.equal(partialRevenue?.value, 4200, "Las sumas conservan los datos oficiales disponibles.");
 assert.equal(partialRevenue?.coverage, "partial", "Las sumas incompletas deben declarar cobertura parcial.");
+
+const nestedPartialDocumentSales = aggregateContractMetric([
+  aggregateContractMetric([documentSelection.documentSales, undefined], 2),
+], 1);
+assert.equal(nestedPartialDocumentSales?.coverage, "partial", "La agregación superior no debe ocultar cobertura documental parcial.");
 
 const labVolume = selectContractMetrics([
   row({ kpi_code: "lab_total_orders", kpi_name: "Órdenes", unit: "ordenes", value: 10 }),

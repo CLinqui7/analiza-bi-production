@@ -140,6 +140,7 @@ type ClosingKpiRow = {
   formula_version: string | null;
   kpi_code: string;
   kpi_name: string;
+  lineage: Array<{ validation_codes: unknown }> | null;
   numerator: number | string | null;
   unit: string;
   value: number | string | null;
@@ -209,6 +210,7 @@ async function getBranchBiSnapshotUncached(
     "manager_assignments",
     "closing_versions",
     "closing_kpi_results",
+    "kpi_result_lineage",
     "insights",
   ];
 
@@ -322,7 +324,7 @@ async function getBranchBiSnapshotUncached(
                 admin
                   .from("closing_kpi_results")
                   .select(
-                    "closing_version_id,kpi_code,kpi_name,category,value,numerator,denominator,unit,data_status,formula_version",
+                    "closing_version_id,kpi_code,kpi_name,category,value,numerator,denominator,unit,data_status,formula_version,lineage:kpi_result_lineage(validation_codes)",
                   )
                   .in("closing_version_id", versionIds)
                   .eq("is_demo", false),
