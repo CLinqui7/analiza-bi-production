@@ -30,9 +30,11 @@ agregación; no usa coincidencias por nombre ni el orden de PostgREST.
   exámenes médicos. Se presenta como `Venta en archivos`, con cobertura
   explícita, y nunca sustituye silenciosamente la facturación total porque el
   reporte puede representar sólo un subconjunto del cierre.
-- Los códigos de validación de `kpi_result_lineage` viajan en la misma consulta
-  embebida de resultados. Una advertencia del parser mantiene el importe
-  extraído visible, lo marca como cobertura parcial y no añade un viaje de red.
+- Los códigos de validación de `kpi_result_lineage` y el resumen del adjunto
+  viajan en la misma consulta embebida de resultados. Una advertencia
+  informativa mantiene cobertura parcial; una evidencia truncada, bloqueada,
+  sin sucursal reconciliada o fuera del período se excluye del total
+  documental. La exclusión queda visible y no añade un viaje de red.
 - Márgenes consolidados suman numeradores y denominadores antes de dividir.
 - Volúmenes con unidades distintas no se suman.
 - Una base ausente vuelve no calculable el consolidado; no se sustituye por
@@ -45,6 +47,30 @@ La versión oficial se obtiene de filas `published` y, si existe una anomalía
 con más de una fila publicada en el mismo grano, se elige de forma
 determinista por versión, fecha de publicación e identificador. Las versiones
 anteriores del mismo período no se agregan.
+
+## Conciliación Excel contra formulario
+
+La evidencia se analiza al finalizar la carga y vuelve a conciliarse en la
+revisión y publicación. La revisión queda incluida en el digest confirmado por
+el usuario, por lo que cambiar respuestas o adjuntos invalida la confirmación.
+
+- Fisioterapia e Imágenes usan sus contratos de plantilla propios. Los valores
+  reconocidos en el Excel se comparan campo por campo contra el formulario.
+- Laboratorio acota el reporte por sucursal y por las fechas exactas del cierre.
+  El total documental puede ser menor al formulario porque el reporte puede ser
+  un subconjunto; se declara cobertura parcial. Si lo supera fuera de una
+  tolerancia de 0.5% o `$1`, la publicación se bloquea.
+- Una sucursal o período incompatible, un archivo estructurado sin campos
+  reconocidos y una diferencia campo a campo bloquean la publicación.
+- Cada cierre exige una fuente estructurada reconocida para su línea. Un PDF,
+  imagen u hoja genérica puede acompañarla como segundo respaldo, pero no
+  sustituirla.
+- Si el formulario se llenó mediante importación, el SHA-256 del Excel adjunto
+  debe coincidir con el archivo importado.
+- Las fórmulas nunca se ejecutan. Se usa exclusivamente su valor almacenado y
+  se revela su presencia como advertencia.
+- Archivos genéricos siguen disponibles como evidencia, pero se presentan como
+  no verificables y no generan KPIs documentales por inferencia.
 
 ## Presentación
 

@@ -218,6 +218,39 @@ El primer preview fue `dpl_XEZktUXu9i6WBLCUoSUo5dwrRmGz`, pero su entorno no ten
 2. La cifra documental se muestra y conserva su linaje, pero sólo 63 de 95 cierres publicados tienen el KPI reconocido; no es un reemplazo de la fuente financiera oficial.
 3. La conciliación completa fuente financiera → respuesta contra un control maestro externo sigue pendiente.
 4. Los 36 archivos de evidencia, los 3 bloqueos por fórmulas y la advertencia de 50,000 filas requieren revisión de ingestión o del archivo fuente; no deben corregirse inventando valores.
+
+## Revisión posterior: conciliación documental (candidato local)
+
+Una revisión adicional de sólo lectura encontró que el total documental
+histórico de `$3,976,727.52` incluía dos evidencias que no deben agregarse al
+período de su cierre:
+
+- Un cierre de noviembre de 2025 contiene un reporte truncado por el límite
+  histórico de 50,000 filas y filas desde noviembre de 2025 hasta septiembre de
+  2026. Su KPI documental histórico es `$567,113.61`.
+- Un cierre de diciembre de 2025 contiene evidencia fechada en enero de 2026.
+  Su KPI documental histórico es `$67,196.50`.
+
+El candidato no reescribe esos cierres. La lectura de Resultados valida el
+linaje, excluye ambos importes y muestra la exclusión. Para los 95 cierres
+oficiales existentes, la simulación de sólo lectura conserva 61 KPIs
+documentales válidos por `$3,342,417.41`.
+
+Además, el candidato:
+
+- analiza la plantilla adjunta de Fisioterapia o Imágenes con el contrato de su
+  propia línea y la compara campo por campo contra el formulario;
+- acota Laboratorio por sucursal y período exactos antes de calcular el total;
+- exige que el archivo adjunto coincida por SHA-256 cuando el formulario fue
+  importado desde Excel;
+- incluye la conciliación en la revisión confirmada y bloquea la publicación si
+  hay diferencias;
+- conserva como parciales los reportes documentales de Laboratorio que cubren
+  legítimamente sólo un subconjunto de la facturación oficial.
+
+Esta sección describe un candidato todavía no desplegado al momento de la
+edición. No cambia la verificación productiva ni el SHA activo documentados
+arriba.
 5. Cualquier prueba futura debe usar el alias estable o el deployment SHA actual, no la URL antigua de la captura.
 6. Mantener las reglas de seguridad: autorización en servidor, ninguna caché pública de contenido privado, aislamiento por organización/período y ninguna escritura histórica automática.
 

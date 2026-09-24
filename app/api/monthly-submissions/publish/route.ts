@@ -13,6 +13,7 @@ import {
   validateMonthlyFormContract,
 } from "@/lib/monthly-form-contract";
 import { buildMonthlyPublicationReview } from "@/lib/server/monthly-publication-review";
+import { reconcileMonthlyEvidence } from "@/lib/server/monthly-evidence-reconciliation";
 import { assertRecordAccess } from "@/lib/v7/security/authorization-policy";
 import { actorForApi, isApiResponse } from "@/lib/v7/server/api-auth";
 import { validateMonthlyResponses } from "@/lib/server/monthly-validation";
@@ -43,6 +44,7 @@ type Version = {
   id: string; submission_id: string; version_number: number; responses: Record<string, unknown>;
   status: string; submitted_by: string; correction_request_id: string | null;
   base_submission_version_id: string | null;
+  validation_summary: Record<string, unknown> | null;
 };
 type BusinessLine = { id: string; code: string; name: string };
 type Branch = { id: string; code: string; name: string };
@@ -112,7 +114,7 @@ export async function POST(request: Request) {
       .maybeSingle(),
     supabase
       .from("manual_monthly_submission_versions")
-      .select("id,submission_id,version_number,responses,status,submitted_by,correction_request_id,base_submission_version_id")
+      .select("id,submission_id,version_number,responses,status,submitted_by,correction_request_id,base_submission_version_id,validation_summary")
       .eq("id", parsed.data.versionId)
       .maybeSingle(),
   ]);
@@ -214,6 +216,27 @@ export async function POST(request: Request) {
     }, { status: 422 });
   }
 
+  const importSourceValue = version.validation_summary?.import_source;
+  const importSource = importSourceValue && typeof importSourceValue === "object" && !Array.isArray(importSourceValue)
+    ? importSourceValue as Record<string, unknown>
+    : null;
+  const reconciliation = reconcileMonthlyEvidence({
+    attachments: validAttachments,
+    formLine,
+    importSource,
+    periodEnd: submission.period_end,
+    periodStart: submission.period_start,
+    responses: contract.normalized,
+  });
+  if (reconciliation.blockers.length > 0) {
+    return NextResponse.json({
+      error: "EVIDENCE_RECONCILIATION_BLOCKED",
+      message: "El Excel no coincide con el formulario, la sucursal o el periodo. Corrige el archivo o el formulario y revisa nuevamente.",
+      blockers: reconciliation.blockers,
+      reconciliation,
+    }, { status: 422 });
+  }
+
   const reportSource = formLine === "Laboratorio" ? attachmentKpiSource(validAttachments) : null;
   const calculated = calculateOfficialKpis(contract.normalized, reportSource);
   if (calculated.length === 0) {
@@ -234,7 +257,9 @@ export async function POST(request: Request) {
     warnings: [
       ...responseValidation.warnings,
       ...attachments.flatMap((item) => item.warning_codes ?? []),
+      ...reconciliation.warnings,
     ],
+    reconciliation,
   });
   const { data: reviewData } = await supabase
     .from("monthly_submission_publication_reviews")

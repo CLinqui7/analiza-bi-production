@@ -20,8 +20,17 @@ export type MedicalExamReportSummary = {
     uniqueExams: number;
     minDate: string | null;
     maxDate: string | null;
+    allPeriodsRowCount: number;
+    allPeriodsTotalSales: number;
+    excludedOutsidePeriodRows: number;
+    undatedRows: number;
   } | null;
   warnings: string[];
+};
+
+export type MedicalExamReportPeriod = {
+  start: string;
+  end: string;
 };
 
 type Matrix = unknown[][];
@@ -130,7 +139,11 @@ function branchMatches(reportLabel: string, target?: { name?: string | null; cod
   return false;
 }
 
-export function summarizeMedicalExamMatrix(matrix: Matrix, targetBranch?: { name?: string | null; code?: string | null }): MedicalExamReportSummary {
+export function summarizeMedicalExamMatrix(
+  matrix: Matrix,
+  targetBranch?: { name?: string | null; code?: string | null },
+  targetPeriod?: MedicalExamReportPeriod,
+): MedicalExamReportSummary {
   const detected = detectMedicalExamHeader(matrix);
   if (!detected) {
     return {
@@ -160,12 +173,25 @@ export function summarizeMedicalExamMatrix(matrix: Matrix, targetBranch?: { name
   const areas = new Set<string>();
   const visitadores = new Set<string>();
   const dates: string[] = [];
-  const branchStats = new Map<string, { rows: number; sales: number; doctors: Set<string>; exams: Set<string>; dates: string[] }>();
+  const branchStats = new Map<string, {
+    rows: number;
+    sales: number;
+    doctors: Set<string>;
+    exams: Set<string>;
+    dates: string[];
+    periodRows: number;
+    periodSales: number;
+    periodDoctors: Set<string>;
+    periodExams: Set<string>;
+    periodDates: string[];
+    outsidePeriodRows: number;
+    undatedRows: number;
+  }>();
   let rowCount = 0;
   let totalSales = 0;
   let invalidTotalRows = 0;
 
-  const maxRows = Math.min(matrix.length, detected.rowIndex + 1 + 50_000);
+  const maxRows = Math.min(matrix.length, detected.rowIndex + 1 + 250_000);
   for (let rowIndex = detected.rowIndex + 1; rowIndex < maxRows; rowIndex += 1) {
     const row = matrix[rowIndex] ?? [];
     const branch = asNonEmpty(pick(row, detected.indexByKey, "sucursal"));
@@ -194,33 +220,77 @@ export function summarizeMedicalExamMatrix(matrix: Matrix, targetBranch?: { name
     if (date) dates.push(date);
 
     if (branch) {
-      const stats = branchStats.get(branch) ?? { rows: 0, sales: 0, doctors: new Set<string>(), exams: new Set<string>(), dates: [] };
+      const stats = branchStats.get(branch) ?? {
+        rows: 0,
+        sales: 0,
+        doctors: new Set<string>(),
+        exams: new Set<string>(),
+        dates: [],
+        periodRows: 0,
+        periodSales: 0,
+        periodDoctors: new Set<string>(),
+        periodExams: new Set<string>(),
+        periodDates: [],
+        outsidePeriodRows: 0,
+        undatedRows: 0,
+      };
       stats.rows += 1;
       stats.sales += total;
       if (doctor) stats.doctors.add(doctor);
       if (exam) stats.exams.add(exam);
       if (date) stats.dates.push(date);
+      if (!targetPeriod) {
+        stats.periodRows += 1;
+        stats.periodSales += total;
+        if (doctor) stats.periodDoctors.add(doctor);
+        if (exam) stats.periodExams.add(exam);
+        if (date) stats.periodDates.push(date);
+      } else if (!date) {
+        stats.undatedRows += 1;
+      } else if (date >= targetPeriod.start && date <= targetPeriod.end) {
+        stats.periodRows += 1;
+        stats.periodSales += total;
+        if (doctor) stats.periodDoctors.add(doctor);
+        if (exam) stats.periodExams.add(exam);
+        stats.periodDates.push(date);
+      } else {
+        stats.outsidePeriodRows += 1;
+      }
       branchStats.set(branch, stats);
     }
   }
 
   const warnings: string[] = [];
-  if (matrix.length > maxRows) warnings.push("ROW_LIMIT_50000_APPLIED");
+  if (matrix.length > maxRows) warnings.push("ROW_LIMIT_250000_APPLIED");
   if (invalidTotalRows > 0) warnings.push(`INVALID_TOTAL_ROWS:${invalidTotalRows}`);
 
-  let match: [string, { rows: number; sales: number; doctors: Set<string>; exams: Set<string>; dates: string[] }] | undefined;
+  let match: [string, NonNullable<ReturnType<typeof branchStats.get>>] | undefined;
   if (targetBranch) match = [...branchStats.entries()].find(([label]) => branchMatches(label, targetBranch));
   if (!match && branchStats.size === 1) match = [...branchStats.entries()][0];
   if (!match && targetBranch && branchStats.size > 1) warnings.push("SELECTED_BRANCH_NOT_FOUND_IN_REPORT");
 
+  if (match && targetPeriod) {
+    if (match[1].periodRows === 0) warnings.push("REPORT_PERIOD_MISMATCH");
+    if (match[1].outsidePeriodRows > 0) {
+      warnings.push(`REPORT_ROWS_OUTSIDE_SUBMISSION_PERIOD:${match[1].outsidePeriodRows}`);
+    }
+    if (match[1].undatedRows > 0) {
+      warnings.push(`REPORT_ROWS_WITHOUT_VALID_DATE:${match[1].undatedRows}`);
+    }
+  }
+
   const matchedBranch = match ? {
     label: match[0],
-    rowCount: match[1].rows,
-    totalSales: Number(match[1].sales.toFixed(2)),
-    uniqueDoctors: match[1].doctors.size,
-    uniqueExams: match[1].exams.size,
-    minDate: minDate(match[1].dates),
-    maxDate: maxDate(match[1].dates),
+    rowCount: match[1].periodRows,
+    totalSales: Number(match[1].periodSales.toFixed(2)),
+    uniqueDoctors: match[1].periodDoctors.size,
+    uniqueExams: match[1].periodExams.size,
+    minDate: minDate(match[1].periodDates),
+    maxDate: maxDate(match[1].periodDates),
+    allPeriodsRowCount: match[1].rows,
+    allPeriodsTotalSales: Number(match[1].sales.toFixed(2)),
+    excludedOutsidePeriodRows: match[1].outsidePeriodRows,
+    undatedRows: match[1].undatedRows,
   } : null;
 
   return {

@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 
+import type { MonthlyEvidenceReconciliation } from "@/lib/server/monthly-evidence-reconciliation";
+
 export const MONTHLY_PUBLICATION_CONFIRMATION =
   "He revisado la información y confirmo su publicación";
 
@@ -49,6 +51,7 @@ type PublicationReviewInput = {
   kpis: ReviewKpi[];
   blockers: string[];
   warnings: string[];
+  reconciliation?: MonthlyEvidenceReconciliation;
 };
 
 function canonicalize(value: unknown): unknown {
@@ -119,6 +122,12 @@ export function buildMonthlyPublicationReview(input: PublicationReviewInput) {
         parserStatus: item.parser_status,
         warningCodes: [...(item.warning_codes ?? [])].sort(),
       })),
+    reconciliation: input.reconciliation ?? {
+      contract: "monthly-evidence-reconciliation:v1",
+      items: [],
+      blockers: [],
+      warnings: [],
+    },
     kpis: [...input.kpis]
       .sort((left, right) => left.code.localeCompare(right.code))
       .map((item) => ({

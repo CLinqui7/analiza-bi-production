@@ -51,6 +51,8 @@ export type BranchBiRecord = {
   countryId: string | null;
   countryName: string | null;
   dataQuality: number | null;
+  /** Document-derived KPI rows excluded from this result after lineage checks. */
+  evidenceValidationCodes: string[];
   hasPublishedClosing: boolean;
   latestPeriod: string | null;
   metrics: Partial<Record<BranchBiMetricKey, BranchBiMetric>>;
@@ -140,7 +142,14 @@ type ClosingKpiRow = {
   formula_version: string | null;
   kpi_code: string;
   kpi_name: string;
-  lineage: Array<{ validation_codes: unknown }> | null;
+  lineage: Array<{
+    validation_codes: unknown;
+    source_attachment: {
+      extracted_summary: unknown;
+      parser_status: unknown;
+      warning_codes: unknown;
+    } | null;
+  }> | null;
   numerator: number | string | null;
   unit: string;
   value: number | string | null;
@@ -324,7 +333,7 @@ async function getBranchBiSnapshotUncached(
                 admin
                   .from("closing_kpi_results")
                   .select(
-                    "closing_version_id,kpi_code,kpi_name,category,value,numerator,denominator,unit,data_status,formula_version,lineage:kpi_result_lineage(validation_codes)",
+                    "closing_version_id,kpi_code,kpi_name,category,value,numerator,denominator,unit,data_status,formula_version,lineage:kpi_result_lineage(validation_codes,source_attachment:manual_monthly_submission_attachments(extracted_summary,parser_status,warning_codes))",
                   )
                   .in("closing_version_id", versionIds)
                   .eq("is_demo", false),
@@ -612,18 +621,33 @@ async function getBranchBiSnapshotUncached(
       const line = businessLineId
         ? (linesById.get(businessLineId) ?? null)
         : null;
-      const versionMetricSelections = branchLineVersions.map((version) =>
+      const versionMetricResults = branchLineVersions.map((version) =>
         selectContractMetrics(
           kpisByVersion.get(version.id) ?? [],
           line?.code ?? null,
-        ).metrics,
+          { periodStart: version.period_start, periodEnd: version.period_end },
+        ),
       );
-      const latestMetrics = aggregateContractMetrics(versionMetricSelections);
+      const latestMetrics = aggregateContractMetrics(versionMetricResults.map((item) => item.metrics));
+      const excludedDocumentCodes = Array.from(new Set(
+        versionMetricResults.flatMap((item) => item.excludedValidationCodes),
+      ));
+      if (latestMetrics.documentSales && excludedDocumentCodes.length > 0) {
+        latestMetrics.documentSales = {
+          ...latestMetrics.documentSales,
+          coverage: "partial",
+          validationCodes: Array.from(new Set([
+            ...latestMetrics.documentSales.validationCodes,
+            ...excludedDocumentCodes,
+          ])),
+        };
+      }
 
       const trend = branchLineVersions.map((version) => {
         const revenue = selectContractMetrics(
           kpisByVersion.get(version.id) ?? [],
           line?.code ?? null,
+          { periodStart: version.period_start, periodEnd: version.period_end },
         ).metrics.revenue ?? null;
         return { period: periodFor(version), revenue };
       });
@@ -655,6 +679,7 @@ async function getBranchBiSnapshotUncached(
         countryId: branch.countryId ?? null,
         countryName: country?.name ?? null,
         dataQuality,
+        evidenceValidationCodes: excludedDocumentCodes,
         hasPublishedClosing: Boolean(latestVersion),
         latestPeriod: latestVersion ? periodFor(latestVersion) : null,
         metrics: latestMetrics,

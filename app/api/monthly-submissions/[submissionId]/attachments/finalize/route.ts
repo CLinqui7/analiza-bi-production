@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 
 import { parseMedicalExamSalesReport } from "@/lib/data-ingestion/medical-exam-report";
+import { resolveFormBusinessLine } from "@/lib/monthly-form-contract";
+import { parseMonthlyWorkbookBuffer } from "@/lib/monthly-workbook-import";
 import { assertRecordAccess } from "@/lib/v7/security/authorization-policy";
 import { actorForApi, isApiResponse } from "@/lib/v7/server/api-auth";
 import { createClient } from "@/lib/supabase/server";
@@ -31,7 +33,7 @@ const schema = z.object({
   mimeType: z.string().max(200).optional(),
 });
 
-type Submission = { id: string; organization_id: string; country_id: string; company_id: string; operational_area_id: string | null; branch_id: string; business_line_id: string; is_demo: boolean };
+type Submission = { id: string; organization_id: string; country_id: string; company_id: string; operational_area_id: string | null; branch_id: string; business_line_id: string; period_start: string; period_end: string; is_demo: boolean };
 type Version = { id: string; submission_id: string; status: string };
 type Branch = { id: string; name: string; code: string };
 type BusinessLine = { id: string; code: string; name: string };
@@ -52,7 +54,7 @@ export async function POST(request: Request, context: { params: Promise<{ submis
   const { submissionId } = await context.params;
   const supabase = await createClient();
   const [{ data: submissionData }, { data: versionData }] = await Promise.all([
-    supabase.from("manual_monthly_submissions").select("id,organization_id,country_id,company_id,operational_area_id,branch_id,business_line_id,is_demo").eq("id", submissionId).maybeSingle(),
+    supabase.from("manual_monthly_submissions").select("id,organization_id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,is_demo").eq("id", submissionId).maybeSingle(),
     supabase.from("manual_monthly_submission_versions").select("id,submission_id,status").eq("id", parsed.data.versionId).maybeSingle(),
   ]);
   if (!submissionData || !versionData) return NextResponse.json({ error: "SUBMISSION_VERSION_NOT_FOUND" }, { status: 404 });
@@ -102,22 +104,90 @@ export async function POST(request: Request, context: { params: Promise<{ submis
   if (!branch || !businessLine) return NextResponse.json({ error: "CONTEXT_CATALOG_NOT_FOUND" }, { status: 409 });
 
   const sha256 = createHash("sha256").update(buffer).digest("hex");
-  let parserKind: "evidence" | "medical_exam_sales_report" | "generic_spreadsheet" = "evidence";
+  let parserKind: "evidence" | "medical_exam_sales_report" | "monthly_form_workbook" | "generic_spreadsheet" = "evidence";
   let parserStatus: "parsed" | "evidence_only" | "warning" | "blocked" = "evidence_only";
   let extractedSummary: Record<string, unknown> = {};
   let warningCodes: string[] = [];
 
-  if (structuredExtensions.has(extension)) {
+  const formLine = resolveFormBusinessLine(businessLine);
+  if ((formLine === "Fisioterapia" || formLine === "Imagenes") && extension === "xlsx") {
     parserKind = "generic_spreadsheet";
     try {
-      const parsedReport = parseMedicalExamSalesReport(buffer, { name: branch.name, code: branch.code });
+      const workbookBuffer = buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset + buffer.byteLength,
+      ) as ArrayBuffer;
+      const imported = await parseMonthlyWorkbookBuffer({
+        line: formLine,
+        buffer: workbookBuffer,
+        period: submission.period_start.slice(0, 7),
+        branchName: branch.name,
+        branchCode: branch.code,
+      });
+      parserKind = "monthly_form_workbook";
+      const parserWarnings = [
+        ...imported.conflicts,
+        ...imported.unresolvedSourceLabels.map((item) => `UNRESOLVED_SOURCE_LABEL:${item}`),
+        ...(imported.formulaFieldIds.length > 0
+          ? [`WORKBOOK_FORMULA_FIELDS:${imported.formulaFieldIds.length}`]
+          : []),
+      ];
+      const blocksWorkbook = imported.status === "blocked" || imported.recognizedCount === 0;
+      parserStatus = blocksWorkbook
+        ? "blocked"
+        : parserWarnings.length > 0
+          ? "warning"
+          : "parsed";
+      warningCodes = blocksWorkbook && imported.recognizedCount === 0
+        ? [...parserWarnings, "NO_RECOGNIZED_WORKBOOK_FIELDS"]
+        : parserWarnings;
+      extractedSummary = {
+        reportType: "monthly_form_workbook",
+        contractVersion: imported.contractVersion,
+        sourceFileSha256: imported.sourceFileSha256,
+        sourceSheet: imported.sourceSheet,
+        detectedPeriod: imported.detectedPeriod,
+        detectedBranch: imported.detectedBranch,
+        matchedColumn: imported.matchedColumn,
+        values: imported.values,
+        recognizedCount: imported.recognizedCount,
+        blankFieldIds: imported.blankFieldIds,
+        conflicts: imported.conflicts,
+        formulaFieldIds: imported.formulaFieldIds,
+        unresolvedSourceLabels: imported.unresolvedSourceLabels,
+      };
+    } catch (error) {
+      parserStatus = "evidence_only";
+      warningCodes = [
+        error instanceof Error && error.message === "EXPECTED_SOURCE_SHEET_NOT_FOUND"
+          ? "EXPECTED_SOURCE_SHEET_NOT_FOUND_STORED_AS_EVIDENCE"
+          : "SPREADSHEET_PARSE_FAILED_STORED_AS_EVIDENCE",
+      ];
+    }
+  } else if (structuredExtensions.has(extension) && formLine === "Laboratorio") {
+    parserKind = "generic_spreadsheet";
+    try {
+      const parsedReport = parseMedicalExamSalesReport(
+        buffer,
+        { name: branch.name, code: branch.code },
+        { start: submission.period_start, end: submission.period_end },
+      );
       if (parsedReport.piiHeaders.length > 0) {
         await supabase.storage.from("monthly-evidence").remove([parsed.data.storagePath]);
         return NextResponse.json({ error: "PII_COLUMNS_BLOCKED", message: "El archivo contiene columnas con datos personales de pacientes. Elimínalas antes de subirlo.", columns: parsedReport.piiHeaders }, { status: 422 });
       }
-      if (parsedReport.recognized && businessLine.code === "LABORATORY") {
+      if (parsedReport.recognized) {
         parserKind = "medical_exam_sales_report";
-        parserStatus = parsedReport.formulaCellCount > 0 ? "blocked" : parsedReport.warnings.length > 0 ? "warning" : "parsed";
+        const blockingWarning = parsedReport.warnings.some((code) =>
+          code === "REPORT_PERIOD_MISMATCH"
+          || code === "SELECTED_BRANCH_NOT_FOUND_IN_REPORT"
+          || code.startsWith("ROW_LIMIT_"),
+        );
+        parserStatus = parsedReport.formulaCellCount > 0 || blockingWarning
+          ? "blocked"
+          : parsedReport.warnings.length > 0
+            ? "warning"
+            : "parsed";
         warningCodes = parsedReport.warnings;
         extractedSummary = {
           reportType: "medical_exam_sales_report",
@@ -136,13 +206,17 @@ export async function POST(request: Request, context: { params: Promise<{ submis
           sheetName: parsedReport.sheetName,
         };
       } else {
-        warningCodes = parsedReport.recognized ? ["REPORT_ONLY_USED_FOR_LABORATORY"] : ["SPREADSHEET_STORED_AS_EVIDENCE_ONLY"];
+        warningCodes = ["SPREADSHEET_STORED_AS_EVIDENCE_ONLY"];
         parserStatus = "evidence_only";
       }
     } catch {
       parserStatus = "warning";
       warningCodes = ["SPREADSHEET_PARSE_FAILED_STORED_AS_EVIDENCE"];
     }
+  } else if (structuredExtensions.has(extension)) {
+    parserKind = "generic_spreadsheet";
+    parserStatus = "evidence_only";
+    warningCodes = ["SPREADSHEET_STORED_AS_EVIDENCE_ONLY"];
   }
 
   const contentType = parsed.data.mimeType || mimeByExtension[extension] || "application/octet-stream";

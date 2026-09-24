@@ -13,6 +13,7 @@ import {
   buildMonthlyPublicationReview,
   MONTHLY_PUBLICATION_CONFIRMATION,
 } from "@/lib/server/monthly-publication-review";
+import { reconcileMonthlyEvidence } from "@/lib/server/monthly-evidence-reconciliation";
 import { validateMonthlyResponses } from "@/lib/server/monthly-validation";
 import { assertRecordAccess } from "@/lib/v7/security/authorization-policy";
 import { actorForApi, isApiResponse } from "@/lib/v7/server/api-auth";
@@ -33,6 +34,7 @@ type Submission = {
 type Version = {
   id: string; submission_id: string; version_number: number; responses: Record<string, unknown>;
   status: string; correction_request_id: string | null; base_submission_version_id: string | null;
+  validation_summary: Record<string, unknown> | null;
 };
 type Attachment = {
   id: string; original_file_name: string; byte_size: number; sha256: string;
@@ -83,7 +85,7 @@ export async function POST(
       .select("id,organization_id,country_id,company_id,operational_area_id,branch_id,business_line_id,period_start,period_end,current_version_number,is_demo")
       .eq("id", submissionId).maybeSingle(),
     supabase.from("manual_monthly_submission_versions")
-      .select("id,submission_id,version_number,responses,status,correction_request_id,base_submission_version_id")
+      .select("id,submission_id,version_number,responses,status,correction_request_id,base_submission_version_id,validation_summary")
       .eq("id", parsed.data.versionId).maybeSingle(),
   ]);
   if (!submissionData || !versionData) return NextResponse.json({ error: "SUBMISSION_VERSION_NOT_FOUND" }, { status: 404 });
@@ -158,6 +160,19 @@ export async function POST(
   ];
   if (validAttachments.length < 1 || validAttachments.length > 2) blockers.push("MONTHLY_ATTACHMENT_REQUIRED");
   if (attachments.some((item) => item.parser_status === "blocked")) blockers.push("BLOCKED_ATTACHMENT_PRESENT");
+  const importSourceValue = version.validation_summary?.import_source;
+  const importSource = importSourceValue && typeof importSourceValue === "object" && !Array.isArray(importSourceValue)
+    ? importSourceValue as Record<string, unknown>
+    : null;
+  const reconciliation = reconcileMonthlyEvidence({
+    attachments: validAttachments,
+    formLine,
+    importSource,
+    periodEnd: submission.period_end,
+    periodStart: submission.period_start,
+    responses: contract.normalized,
+  });
+  blockers.push(...reconciliation.blockers);
   const calculated = calculateOfficialKpis(
     contract.normalized,
     formLine === "Laboratorio" ? attachmentSource(validAttachments) : null,
@@ -166,6 +181,7 @@ export async function POST(
   const warnings = [
     ...validation.warnings,
     ...attachments.flatMap((item) => item.warning_codes ?? []),
+    ...reconciliation.warnings,
   ];
   const review = buildMonthlyPublicationReview({
     submission,
@@ -176,6 +192,7 @@ export async function POST(
     kpis: calculated,
     blockers,
     warnings,
+    reconciliation,
   });
 
   if (parsed.data.action === "prepare") {

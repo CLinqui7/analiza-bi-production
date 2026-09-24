@@ -71,9 +71,40 @@ const warnedDocumentSelection = selectContractMetrics([
     lineage: [{ validation_codes: ["ROW_LIMIT_50000_APPLIED"] }],
     value: 567113.61,
   }),
-], "LABORATORY").metrics.documentSales;
-assert.equal(warnedDocumentSelection?.coverage, "partial", "Una advertencia del parser impide declarar cobertura documental completa.");
-assert.deepEqual(warnedDocumentSelection?.validationCodes, ["ROW_LIMIT_50000_APPLIED"]);
+], "LABORATORY");
+assert.equal(warnedDocumentSelection.metrics.documentSales, undefined, "Un total truncado no debe aparecer como venta documental.");
+assert.ok(warnedDocumentSelection.excludedValidationCodes.includes("ROW_LIMIT_50000_APPLIED"));
+
+const periodMismatchSelection = selectContractMetrics([
+  row({
+    kpi_code: "lab_medical_exam_report_sales",
+    lineage: [{
+      source_attachment: {
+        extracted_summary: { matchedBranch: { minDate: "2026-09-01", maxDate: "2026-09-30" } },
+        parser_status: "parsed",
+        warning_codes: [],
+      },
+    }],
+    value: 574,
+  }),
+], "LABORATORY", { periodStart: "2026-08-01", periodEnd: "2026-08-31" });
+assert.equal(periodMismatchSelection.metrics.documentSales, undefined, "Una evidencia de otro mes no debe contaminar el cierre seleccionado.");
+assert.deepEqual(periodMismatchSelection.excludedValidationCodes, ["DOCUMENT_PERIOD_MISMATCH"]);
+
+const periodMatchedSelection = selectContractMetrics([
+  row({
+    kpi_code: "lab_medical_exam_report_sales",
+    lineage: [{
+      source_attachment: {
+        extracted_summary: { matchedBranch: { minDate: "2026-08-01", maxDate: "2026-08-31" } },
+        parser_status: "parsed",
+        warning_codes: [],
+      },
+    }],
+    value: 245.75,
+  }),
+], "LABORATORY", { periodStart: "2026-08-01", periodEnd: "2026-08-31" });
+assert.equal(periodMatchedSelection.metrics.documentSales?.value, 245.75);
 
 const marginA = selectContractMetrics([
   row({ closing_version_id: "a", kpi_code: "estimated_contribution_margin_pct", kpi_name: "Margen %", numerator: 400, denominator: 1000, unit: "%", value: 40 }),

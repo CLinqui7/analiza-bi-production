@@ -2,7 +2,11 @@ import "server-only";
 
 import * as XLSX from "xlsx";
 
-import { summarizeMedicalExamMatrix, type MedicalExamReportSummary } from "./medical-exam-report-core";
+import {
+  summarizeMedicalExamMatrix,
+  type MedicalExamReportPeriod,
+  type MedicalExamReportSummary,
+} from "./medical-exam-report-core";
 
 export type ParsedMedicalExamReport = MedicalExamReportSummary & {
   formulaCellCount: number;
@@ -31,16 +35,17 @@ function formulaCellCount(sheet: XLSX.WorkSheet) {
 export function parseMedicalExamSalesReport(
   buffer: Buffer,
   targetBranch?: { name?: string | null; code?: string | null },
+  targetPeriod?: MedicalExamReportPeriod,
 ): ParsedMedicalExamReport {
   const workbook = XLSX.read(buffer, { type: "buffer", cellFormula: true, cellDates: true, raw: true });
   const sheetName = workbook.SheetNames[0] ?? null;
   if (!sheetName) {
-    return { ...summarizeMedicalExamMatrix([], targetBranch), formulaCellCount: 0, sheetName: null, piiHeaders: [], warnings: ["EMPTY_WORKBOOK"] };
+    return { ...summarizeMedicalExamMatrix([], targetBranch, targetPeriod), formulaCellCount: 0, sheetName: null, piiHeaders: [], warnings: ["EMPTY_WORKBOOK"] };
   }
   const sheet = workbook.Sheets[sheetName];
   const formulas = formulaCellCount(sheet);
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: null, raw: true, blankrows: false });
-  const summary = summarizeMedicalExamMatrix(matrix, targetBranch);
+  const summary = summarizeMedicalExamMatrix(matrix, targetBranch, targetPeriod);
   const piiHeaders = detectPiiHeaders(matrix, summary.headerRowNumber);
   const warnings = [...summary.warnings, ...piiHeaders.map((header) => `PII_COLUMN_BLOCKED:${header}`)];
   if (workbook.SheetNames.length > 1) warnings.push("ONLY_FIRST_SHEET_PARSED");

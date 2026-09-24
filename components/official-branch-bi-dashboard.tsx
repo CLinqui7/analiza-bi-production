@@ -60,11 +60,18 @@ function coverageLabel(metric: BranchBiMetric | null | undefined) {
     : "Agregado de KPIs calculables";
 }
 
-function documentCoverageLabel(metric: BranchBiMetric | null | undefined) {
-  if (!metric) return "Sin Excel estructurado reconocido en el alcance";
+function documentCoverageLabel(
+  metric: BranchBiMetric | null | undefined,
+  excludedValidationCodes: readonly string[],
+) {
+  if (!metric) {
+    return excludedValidationCodes.length > 0
+      ? `Sin total documental válido · ${excludedValidationCodes.length} validación${excludedValidationCodes.length === 1 ? "" : "es"} excluyeron evidencia incompatible`
+      : "Sin Excel estructurado reconocido en el alcance";
+  }
   const closings = metric.sourceVersionIds.length;
-  const warnings = metric.validationCodes.length;
-  return `Extraída de ${closings} cierre${closings === 1 ? "" : "s"} con Excel reconocido${metric.coverage === "partial" ? " · cobertura parcial" : ""}${warnings > 0 ? ` · ${warnings} advertencia${warnings === 1 ? "" : "s"} de parser` : ""}`;
+  const warnings = new Set([...metric.validationCodes, ...excludedValidationCodes]).size;
+  return `Extraída de ${closings} cierre${closings === 1 ? "" : "s"} con Excel reconocido${metric.coverage === "partial" ? " · cobertura parcial" : ""}${warnings > 0 ? ` · ${warnings} validación${warnings === 1 ? "" : "es"} de evidencia` : ""}`;
 }
 
 function average(records: readonly BranchBiRecord[], select: (record: BranchBiRecord) => number | null) {
@@ -179,6 +186,7 @@ function Matrix({ records }: { records: readonly BranchBiRecord[] }) {
 /** Results is a period aggregate.  It deliberately is not the branch ranking view. */
 function ResultsDashboard({ snapshot }: { snapshot: BranchBiSnapshot }) {
   const records = snapshot.records;
+  const excludedDocumentCodes = Array.from(new Set(records.flatMap((record) => record.evidenceValidationCodes)));
   const revenue = aggregateRevenue(records);
   const documentSales = aggregateContractMetric(records.map((record) => record.metrics.documentSales), records.length);
   const margin = aggregateContractMetric(records.map((record) => record.metrics.margin), records.length);
@@ -189,9 +197,9 @@ function ResultsDashboard({ snapshot }: { snapshot: BranchBiSnapshot }) {
     <header className="grid gap-3"><Badge className="w-fit bg-emerald-100 text-emerald-800 hover:bg-emerald-100">Datos oficiales</Badge><div className="flex items-center gap-3"><div className="flex size-10 items-center justify-center rounded-lg border bg-card"><BarChart3 className="size-5 text-primary" /></div><div><h1 className="text-3xl font-semibold tracking-normal">Resultados operativos</h1><p className="mt-1 text-sm leading-6 text-muted-foreground">KPIs agregados, variación, cumplimiento y tendencia del período global seleccionado.</p></div></div></header>
     {!snapshot.sourceAvailable ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">La fuente V7 no está disponible; no se muestran valores de respaldo.</div> : null}
     <section className="rounded-lg border bg-card p-4" data-testid="bi-filters"><div className="flex items-center gap-2 text-sm font-semibold"><Target className="size-4 text-primary" />Contexto global aplicado</div><p className="mt-1 text-sm text-muted-foreground">La cabecera es la única fuente de país, línea, área, sucursal, gerente y período.</p></section>
-    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">{[["Facturación", formatMetric(revenue ?? undefined), coverageLabel(revenue)], ["Venta en archivos", formatMetric(documentSales ?? undefined), documentCoverageLabel(documentSales)], ["Margen", formatMetric(margin ?? undefined), coverageLabel(margin)], ["Volumen", formatMetric(volume ?? undefined), coverageLabel(volume)], ["Ocupación", formatMetric(occupancy ?? undefined), coverageLabel(occupancy)], ["SLA / TAT", formatMetric(sla ?? undefined), coverageLabel(sla)]].map(([label, value, note]) => <article className="rounded-lg border bg-card p-4" data-testid={label === "Venta en archivos" ? "bi-document-sales" : undefined} key={label}><div className="text-sm text-muted-foreground">{label}</div><div className="mt-2 text-2xl font-semibold">{value}</div><p className="mt-2 text-xs text-muted-foreground">{note}</p></article>)}</section>
+    <section className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">{[["Facturación", formatMetric(revenue ?? undefined), coverageLabel(revenue)], ["Venta en archivos", formatMetric(documentSales ?? undefined), documentCoverageLabel(documentSales, excludedDocumentCodes)], ["Margen", formatMetric(margin ?? undefined), coverageLabel(margin)], ["Volumen", formatMetric(volume ?? undefined), coverageLabel(volume)], ["Ocupación", formatMetric(occupancy ?? undefined), coverageLabel(occupancy)], ["SLA / TAT", formatMetric(sla ?? undefined), coverageLabel(sla)]].map(([label, value, note]) => <article className="rounded-lg border bg-card p-4" data-testid={label === "Venta en archivos" ? "bi-document-sales" : undefined} key={label}><div className="text-sm text-muted-foreground">{label}</div><div className="mt-2 text-2xl font-semibold">{value}</div><p className="mt-2 text-xs text-muted-foreground">{note}</p></article>)}</section>
     <section className="rounded-lg border bg-card p-4"><div className="mb-3 text-sm font-semibold">Tendencia de facturación por unidad sucursal + línea</div><TrendChart records={records} /></section>
-    <section className="rounded-lg border bg-card p-4" data-testid="bi-results-aggregate"><div className="mb-3 text-sm font-semibold">Comparación compacta</div><div className="overflow-x-auto"><table className="w-full min-w-[820px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr><th className="py-2 pr-4">Unidad</th><th className="py-2 pr-4">Facturación</th><th className="py-2 pr-4">Venta en archivos</th><th className="py-2 pr-4">Margen</th><th className="py-2">Calidad</th></tr></thead><tbody>{records.map((record) => <tr className="border-b last:border-b-0" key={record.recordId}><td className="py-3 pr-4 font-medium">{record.branchName} · {record.businessLineName ?? "Sin línea"}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.documentSales)}</td><td className="py-3 pr-4">{formatMetric(record.metrics.margin)}</td><td className="py-3">{formatNumber(record.dataQuality, "%")}</td></tr>)}</tbody></table></div></section>
+    <section className="rounded-lg border bg-card p-4" data-testid="bi-results-aggregate"><div className="mb-3 text-sm font-semibold">Comparación compacta</div><div className="overflow-x-auto"><table className="w-full min-w-[820px] text-left text-sm"><thead className="border-b text-xs text-muted-foreground"><tr><th className="py-2 pr-4">Unidad</th><th className="py-2 pr-4">Facturación</th><th className="py-2 pr-4">Venta en archivos</th><th className="py-2 pr-4">Margen</th><th className="py-2">Calidad</th></tr></thead><tbody>{records.map((record) => <tr className="border-b last:border-b-0" key={record.recordId}><td className="py-3 pr-4 font-medium">{record.branchName} · {record.businessLineName ?? "Sin línea"}</td><td className="py-3 pr-4">{formatMetric(record.metrics.revenue)}</td><td className="py-3 pr-4">{record.metrics.documentSales ? formatMetric(record.metrics.documentSales) : record.evidenceValidationCodes.length > 0 ? "Excluido por validación" : "Sin dato"}</td><td className="py-3 pr-4">{formatMetric(record.metrics.margin)}</td><td className="py-3">{formatNumber(record.dataQuality, "%")}</td></tr>)}</tbody></table></div></section>
     <footer className="rounded-lg border bg-card p-4 text-xs text-muted-foreground">Fuente V7: {snapshot.sourceTables.join(" → ")}. “Venta en archivos” conserva el agregado extraído del Excel; no sustituye la facturación oficial cuando el documento cubre sólo un subconjunto. Resultados no contiene ranking, mapa ni heatmap de sucursales.</footer>
   </section>;
 }

@@ -149,6 +149,25 @@ type PublicationReview = {
   kpis: Array<{ code: string; name: string; value: number; unit: string }>;
   blockers: string[];
   warnings: string[];
+  reconciliation: {
+    contract: string;
+    items: Array<{
+      attachmentId: string;
+      source: "medical_exam_sales_report" | "monthly_form_workbook" | "generic_evidence";
+      status: "matched" | "partial" | "mismatch" | "unverified";
+      recognizedFieldCount: number;
+      matchedFieldCount: number;
+      mismatchedFields: string[];
+      formTotal: number | null;
+      documentTotal: number | null;
+      difference: number | null;
+      coveragePct: number | null;
+      documentPeriodStart: string | null;
+      documentPeriodEnd: string | null;
+    }>;
+    blockers: string[];
+    warnings: string[];
+  };
 };
 type CorrectionRequest = {
   id: string;
@@ -174,6 +193,9 @@ type AttachmentSummary = {
   uniqueExams?: number;
   minDate?: string | null;
   maxDate?: string | null;
+  recognizedCount?: number;
+  detectedPeriod?: string | null;
+  detectedBranch?: string | null;
   matchedBranch?: {
     branchLabel?: string;
     rowCount?: number;
@@ -1566,6 +1588,13 @@ export function MonthlySubmissionCenter({
                           </>}
                         </div>
                       )}
+                      {attachment.parser_kind === "monthly_form_workbook" && (
+                        <div className="mt-3 grid gap-2 rounded-md bg-muted/30 p-3 text-xs sm:grid-cols-3">
+                          <div><span className="text-muted-foreground">Campos leídos</span><p className="font-medium">{attachment.extracted_summary.recognizedCount ?? 0}</p></div>
+                          <div><span className="text-muted-foreground">Periodo del Excel</span><p className="font-medium">{attachment.extracted_summary.detectedPeriod ?? "Sin dato"}</p></div>
+                          <div><span className="text-muted-foreground">Sucursal del Excel</span><p className="font-medium">{attachment.extracted_summary.detectedBranch ?? "Sin dato"}</p></div>
+                        </div>
+                      )}
                       {attachment.warning_codes?.length > 0 && <p className="mt-2 text-xs text-amber-700">Validación: {attachment.warning_codes.join(" · ")}</p>}
                     </div>
                   );
@@ -1671,6 +1700,18 @@ export function MonthlySubmissionCenter({
                     <div className="rounded-md border bg-background p-3 text-xs">
                       <p className="font-medium">Evidencia asociada</p>
                       {publicationReview.evidence.map((item) => <p key={item.id}>{item.fileName} · {item.parserStatus}</p>)}
+                    </div>
+                  )}
+                  {publicationReview.reconciliation.items.length > 0 && (
+                    <div className="grid gap-2 rounded-md border bg-background p-3 text-xs" data-testid="monthly-evidence-reconciliation">
+                      <p className="font-medium">Conciliación Excel contra formulario</p>
+                      {publicationReview.reconciliation.items.map((item) => (
+                        <div className="rounded border p-2" key={item.attachmentId}>
+                          <p><strong>{item.status === "matched" ? "Coincide" : item.status === "partial" ? "Cobertura parcial" : item.status === "mismatch" ? "No coincide" : "No verificable"}</strong> · {item.source === "medical_exam_sales_report" ? "reporte de exámenes" : item.source === "monthly_form_workbook" ? "plantilla mensual" : "evidencia genérica"}</p>
+                          {item.source === "monthly_form_workbook" && <p>{item.matchedFieldCount} de {item.recognizedFieldCount} campos coinciden{item.mismatchedFields.length > 0 ? ` · Diferencias: ${item.mismatchedFields.join(", ")}` : ""}</p>}
+                          {item.source === "medical_exam_sales_report" && <p>Formulario: {currency(item.formTotal ?? undefined)} · Excel: {currency(item.documentTotal ?? undefined)} · Cobertura: {item.coveragePct === null ? "Sin dato" : `${item.coveragePct}%`} · Periodo: {item.documentPeriodStart ?? "Sin fecha"} a {item.documentPeriodEnd ?? "Sin fecha"}</p>}
+                        </div>
+                      ))}
                     </div>
                   )}
                   {publicationReview.blankFields.length > 0 && <p className="text-xs text-muted-foreground">Datos ausentes: {publicationReview.blankFields.join(" · ")}</p>}

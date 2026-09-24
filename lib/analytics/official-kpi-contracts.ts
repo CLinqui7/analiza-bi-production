@@ -34,7 +34,14 @@ export type ContractKpiRow = {
   formula_version: string | null;
   kpi_code: string;
   kpi_name: string;
-  lineage?: readonly { validation_codes?: unknown }[] | null;
+  lineage?: readonly {
+    validation_codes?: unknown;
+    source_attachment?: {
+      extracted_summary?: unknown;
+      parser_status?: unknown;
+      warning_codes?: unknown;
+    } | null;
+  }[] | null;
   numerator: number | string | null;
   unit: string;
   value: number | string | null;
@@ -120,11 +127,54 @@ function rowIsCalculable(row: ContractKpiRow) {
 function validationCodesForRow(row: ContractKpiRow) {
   return Array.from(new Set(
     (row.lineage ?? []).flatMap((item) =>
-      Array.isArray(item.validation_codes)
-        ? item.validation_codes.filter((code): code is string => typeof code === "string")
-        : [],
+      [
+        ...(Array.isArray(item.validation_codes)
+          ? item.validation_codes.filter((code): code is string => typeof code === "string")
+          : []),
+        ...(Array.isArray(item.source_attachment?.warning_codes)
+          ? item.source_attachment.warning_codes.filter((code): code is string => typeof code === "string")
+          : []),
+      ],
     ),
   ));
+}
+
+function evidenceRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function documentEvidenceExclusions(
+  row: ContractKpiRow,
+  period?: { periodStart?: string | null; periodEnd?: string | null },
+) {
+  if (row.kpi_code !== "lab_medical_exam_report_sales") return [];
+  const codes = validationCodesForRow(row);
+  const exclusions = codes.filter((code) =>
+    code.startsWith("ROW_LIMIT_")
+    || code === "REPORT_PERIOD_MISMATCH"
+    || code === "SELECTED_BRANCH_NOT_FOUND_IN_REPORT",
+  );
+  for (const lineage of row.lineage ?? []) {
+    const attachment = lineage.source_attachment;
+    const parserStatus = typeof attachment?.parser_status === "string" ? attachment.parser_status : null;
+    if (parserStatus === "blocked" || parserStatus === "failed") exclusions.push("DOCUMENT_ATTACHMENT_BLOCKED");
+    const summary = evidenceRecord(attachment?.extracted_summary);
+    const matchedBranch = evidenceRecord(summary?.matchedBranch);
+    if (!matchedBranch) {
+      exclusions.push("DOCUMENT_BRANCH_NOT_RECONCILED");
+      continue;
+    }
+    const minDate = typeof matchedBranch.minDate === "string" ? matchedBranch.minDate : null;
+    const maxDate = typeof matchedBranch.maxDate === "string" ? matchedBranch.maxDate : null;
+    if (
+      period?.periodStart
+      && period?.periodEnd
+      && ((minDate && minDate < period.periodStart) || (maxDate && maxDate > period.periodEnd))
+    ) exclusions.push("DOCUMENT_PERIOD_MISMATCH");
+  }
+  return Array.from(new Set(exclusions));
 }
 
 export function contractForKpiCode(code: string) {
@@ -138,15 +188,23 @@ export function contractForKpiCode(code: string) {
 export function selectContractMetrics(
   rows: readonly ContractKpiRow[],
   lineCode: string | null,
+  period?: { periodStart?: string | null; periodEnd?: string | null },
 ) {
   const selected: Partial<Record<OfficialMetricKey, ContractMetric>> = {};
   const ambiguousCodes: string[] = [];
+  const excludedValidationCodes: string[] = [];
 
   for (const key of Object.keys(preferenceByMetric) as OfficialMetricKey[]) {
     for (const code of preferenceByMetric[key]) {
       const contract = contractByCode.get(code);
       if (!contract || !contractApplies(contract, lineCode)) continue;
-      const candidates = rows.filter((row) => row.kpi_code === code && rowIsCalculable(row));
+      const candidates = rows.filter((row) => {
+        if (row.kpi_code !== code || !rowIsCalculable(row)) return false;
+        const exclusions = documentEvidenceExclusions(row, period);
+        if (exclusions.length === 0) return true;
+        excludedValidationCodes.push(...exclusions);
+        return false;
+      });
       if (candidates.length > 1) {
         ambiguousCodes.push(code);
         break;
@@ -208,7 +266,11 @@ export function selectContractMetrics(
     }
   }
 
-  return { ambiguousCodes, metrics: selected };
+  return {
+    ambiguousCodes,
+    excludedValidationCodes: Array.from(new Set(excludedValidationCodes)),
+    metrics: selected,
+  };
 }
 
 function compatibleUnit(metrics: readonly ContractMetric[]) {
